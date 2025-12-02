@@ -1,0 +1,821 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// State table (must be created first)
+model State {
+  id         Int       @id @default(autoincrement())
+  state_name String    @db.VarChar(255)
+  clientBu   ClientBu[]
+
+  @@index([state_name], name: "idx_state_name")
+  @@map("state")
+}
+
+enum UserRole {
+  Super_Admin
+  Admin
+  Initiator
+}
+
+// Users table (referenced by many tables)
+model User {
+  id              Int       @id @default(autoincrement())
+  first_name      String?   @db.VarChar(50)
+  last_name       String?   @db.VarChar(50)
+  email           String?   @unique @db.VarChar(50)
+  password        String?   @db.VarChar(255)
+  mobile          String?   @db.VarChar(10)
+  user_role       UserRole?
+  authority       String?   @db.VarChar(255)
+  job_register_ids String?   @db.Text
+  status          UserStatus?
+  created_at      DateTime? @default(now()) @db.DateTime(0)
+  updated_at      DateTime? @db.DateTime(0)
+  deleted_at      DateTime? @db.DateTime(0)
+  added_by        Int?
+  deleted_by      Int?
+
+  // Self-referencing relationships
+  addedByUser   User?  @relation("UserAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser User?  @relation("UserDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedUsers    User[] @relation("UserAddedBy")
+  deletedUsers  User[] @relation("UserDeletedBy")
+
+  // Related models
+  gstRates              GstRate[] @relation("GstRateAddedBy")
+  accounts              Account[] @relation("AccountAddedBy")
+  accountsDeleted       Account[] @relation("AccountDeletedBy")
+  clientInfos           ClientInfo[] @relation("ClientInfoAddedBy")
+  clientInfosDeleted    ClientInfo[] @relation("ClientInfoDeletedBy")
+  clientBus             ClientBu[] @relation("ClientBuAddedBy")
+  clientBusDeleted      ClientBu[] @relation("ClientBuDeletedBy")
+  jobRegisters          JobRegister[] @relation("JobRegisterAddedBy")
+  jobRegistersDeleted   JobRegister[] @relation("JobRegisterDeletedBy")
+  jobRegisterFields     JobRegisterField[] @relation("JobRegisterFieldAddedBy")
+  jobRegisterFieldsUpdated JobRegisterField[] @relation("JobRegisterFieldUpdatedBy")
+  jobs                  Job[] @relation("JobAddedBy")
+  jobsDeleted           Job[] @relation("JobDeletedBy")
+  jobAttachments        JobAttachment[] @relation("JobAttachmentAddedBy")
+  jobAttachmentsDeleted JobAttachment[] @relation("JobAttachmentDeletedBy")
+  jobServiceCharges     JobServiceCharge[] @relation("JobServiceChargeAddedBy")
+  jobServiceChargesDeleted JobServiceCharge[] @relation("JobServiceChargeDeletedBy")
+  clientServiceCharges  ClientServiceCharge[] @relation("ClientServiceChargeAddedBy")
+  clientServiceChargesDeleted ClientServiceCharge[] @relation("ClientServiceChargeDeletedBy")
+  invoices              Invoice[] @relation("InvoiceAddedBy")
+  invoicesCanceled     Invoice[] @relation("InvoiceCanceledBy")
+  invoicesPerformaCreated Invoice[] @relation("InvoicePerformaCreatedBy")
+  invoicesPerformaCanceled Invoice[] @relation("InvoicePerformaCanceledBy")
+  invoiceSelectedJobs   InvoiceSelectedJob[] @relation("InvoiceSelectedJobCreatedBy")
+  invoiceAnnexures      InvoiceAnnexure[] @relation("InvoiceAnnexureCreatedBy")
+  invoiceAnnexuresCanceled InvoiceAnnexure[] @relation("InvoiceAnnexureCanceledBy")
+  fieldsMasters         FieldsMaster[] @relation("FieldsMasterAddedBy")
+  fieldsMastersDeleted  FieldsMaster[] @relation("FieldsMasterDeletedBy")
+  jobReports            JobReport[] @relation("JobReportAddedBy")
+  jobReportsDeleted     JobReport[] @relation("JobReportDeletedBy")
+  userSettings          UserSettings?
+
+  @@index([status], name: "idx_status")
+  @@index([user_role], name: "idx_user_role")
+  @@index([mobile], name: "idx_mobile")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("users")
+}
+
+enum UserStatus {
+  Active
+  InActive
+  Delete
+}
+
+// GST Rates
+model GstRate {
+  id         Int       @id @default(autoincrement())
+  sac_no     String?   @db.VarChar(255)
+  sgst       Float?
+  cgst       Float?
+  igst       Float?
+  created_at DateTime? @default(now()) @db.DateTime(0)
+  updated_at DateTime? @db.DateTime(0)
+  added_by   Int?
+
+  addedByUser User?         @relation("GstRateAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobRegisters JobRegister[]
+
+  @@index([sac_no], name: "idx_sac_no")
+  @@index([added_by], name: "idx_added_by")
+  @@map("gst_rates")
+}
+
+// Accounts
+model Account {
+  id                        Int          @id @default(autoincrement())
+  account_name              String?      @db.VarChar(255)
+  account_address           String?      @db.Text
+  bank_name                 String?      @db.VarChar(255)
+  bank_address              String?      @db.Text
+  account_no                String?      @db.VarChar(50)
+  ifsc_no                   String?      @db.VarChar(255)
+  gst_no                    String?      @db.VarChar(255)
+  pan_no                    String?      @db.VarChar(255)
+  msme_details             String?      @db.VarChar(255)
+  remark                    String?      @db.VarChar(255)
+  invoice_serial_initial     String?      @db.VarChar(255)
+  invoice_serial_second_no  String?      @db.VarChar(255)
+  status                    AccountStatus?
+  created_at                DateTime?     @default(now()) @db.DateTime(0)
+  updated_at                DateTime?     @db.DateTime(0)
+  deleted_at                DateTime?     @db.DateTime(0)
+  added_by                  Int?
+  deleted_by                Int?
+
+  addedByUser      User?                @relation("AccountAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser     User?                @relation("AccountDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientInfos      ClientInfo[]
+  clientServiceCharges ClientServiceCharge[]
+
+  @@index([status], name: "idx_status")
+  @@index([gst_no], name: "idx_gst_no")
+  @@index([pan_no], name: "idx_pan_no")
+  @@index([account_name], name: "idx_account_name")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("accounts")
+}
+
+enum AccountStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Client Info
+model ClientInfo {
+  id              Int            @id @default(autoincrement())
+  account_id      Int?
+  client_name     String?         @db.VarChar(255)
+  iec_no          String?         @db.VarChar(255)
+  alias           String?         @db.VarChar(255)
+  credit_terms    String?         @db.VarChar(255)
+  client_owner_ship String?       @db.VarChar(255)
+  status          ClientInfoStatus?
+  created_at      DateTime?       @default(now()) @db.DateTime(0)
+  updated_at      DateTime?       @db.DateTime(0)
+  deleted_at      DateTime?       @db.DateTime(0)
+  added_by        Int?
+  deleted_by      Int?
+
+  account         Account?            @relation(fields: [account_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser     User?               @relation("ClientInfoAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser   User?               @relation("ClientInfoDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientBus       ClientBu[]
+  clientServiceCharges ClientServiceCharge[]
+
+  @@index([account_id], name: "idx_account_id")
+  @@index([client_name], name: "idx_client_name")
+  @@index([iec_no], name: "idx_iec_no")
+  @@index([alias], name: "idx_alias")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("client_info")
+}
+
+enum ClientInfoStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Client Business Unit
+model ClientBu {
+  id            Int            @id @default(autoincrement())
+  client_info_id Int?
+  bu_name       String?        @db.VarChar(255)
+  client_type   String?        @db.VarChar(255)
+  state_id      Int?
+  city          String?        @db.VarChar(255)
+  pincode       Int?
+  branch_code   String?        @db.VarChar(255)
+  address       String?        @db.Text
+  gst_no        String?        @db.VarChar(255)
+  sc_i          String?        @db.VarChar(255)
+  status        ClientBuStatus?
+  created_at    DateTime?      @default(now()) @db.DateTime(0)
+  updated_at    DateTime?      @db.DateTime(0)
+  deleted_at    DateTime?      @db.DateTime(0)
+  added_by      Int?
+  deleted_by    Int?
+
+  clientInfo    ClientInfo?        @relation(fields: [client_info_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  state         State?             @relation(fields: [state_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser   User?              @relation("ClientBuAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser User?              @relation("ClientBuDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientServiceCharges ClientServiceCharge[]
+
+  @@index([client_info_id], name: "idx_client_info_id")
+  @@index([state_id], name: "idx_state_id")
+  @@index([bu_name], name: "idx_bu_name")
+  @@index([client_type], name: "idx_client_type")
+  @@index([gst_no], name: "idx_gst_no")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("client_bu")
+}
+
+enum ClientBuStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Job Register
+model JobRegister {
+  id                Int              @id @default(autoincrement())
+  job_code          String?          @db.VarChar(255)
+  job_title         String?          @db.VarChar(255)
+  job_type          String?          @db.VarChar(255)
+  gst_rate_id       Int?
+  remi_one_desc     String?          @db.VarChar(255)
+  remi_two_desc     String?          @db.VarChar(255)
+  remi_three_desc   String?          @db.VarChar(255)
+  remi_four_desc    String?          @db.VarChar(255)
+  remi_five_desc    String?          @db.VarChar(255)
+  field_order       String?          @db.Text
+  status            JobRegisterStatus?
+  created_at        DateTime?        @default(now()) @db.DateTime(0)
+  updated_at        DateTime?        @db.DateTime(0)
+  deleted_at        DateTime?        @db.DateTime(0)
+  added_by          Int?
+  deleted_by        Int?
+
+  gstRate           GstRate?              @relation(fields: [gst_rate_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser       User?                 @relation("JobRegisterAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser     User?                 @relation("JobRegisterDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobRegisterFields JobRegisterField[]
+  jobs              Job[]
+  clientServiceCharges ClientServiceCharge[]
+  invoices          Invoice[]
+
+  @@index([job_code], name: "idx_job_code")
+  @@index([job_title], name: "idx_job_title")
+  @@index([job_type], name: "idx_job_type")
+  @@index([gst_rate_id], name: "idx_gst_rate_id")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("job_register")
+}
+
+enum JobRegisterStatus {
+  Active
+  Inactive
+  Delete
+}
+
+// Job Register Fields
+model JobRegisterField {
+  id              Int                        @id @default(autoincrement())
+  job_register_id Int?
+  form_fields_json Json?
+  status          JobRegisterFieldStatus?
+  created_at      DateTime?                   @default(now()) @db.DateTime(0)
+  updated_at      DateTime?                  @db.DateTime(0)
+  added_by        Int?
+  updated_by      Int?
+
+  jobRegister     JobRegister?               @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser     User?                     @relation("JobRegisterFieldAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedByUser   User?                     @relation("JobRegisterFieldUpdatedBy", fields: [updated_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobs            Job[]
+
+  @@index([job_register_id], name: "idx_job_register_id")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([updated_by], name: "idx_updated_by")
+  @@map("job_register_fields")
+}
+
+enum JobRegisterFieldStatus {
+  In_process
+  Closed
+  Active
+  Inactive
+}
+
+// Job
+model Job {
+  id                                      Int       @id @default(autoincrement())
+  job_register_id                        Int?
+  job_no                                 String?   @db.VarChar(255)
+  job_register_field_id                  Int?
+  type_of_unit                           String?   @db.VarChar(255)
+  job_owner                              String?   @db.VarChar(255)
+  job_owner_email_id                     String?   @db.VarChar(255)
+  job_owner_phone_no                     Float?
+  processor                              String?   @db.VarChar(255)
+  processor_email_id                     String?   @db.VarChar(255)
+  processor_phone_no                     Float?
+  port                                   String?   @db.VarChar(255)
+  claim_no                               String?   @db.VarChar(255)
+  po_no                                  String?   @db.VarChar(255)
+  quantity                               String?   @db.VarChar(255)
+  description_of_quantity                String?   @db.VarChar(255)
+  job_date                               DateTime? @db.Date
+  application_target_date                DateTime? @db.Date
+  application_date                       DateTime? @db.Date
+  application                            String?   @db.VarChar(255)
+  claim_amount_after_finalization        String?   @db.VarChar(255)
+  appl_fee_duty_paid                     String?   @db.VarChar(255)
+  appl_fees_reference_no                 String?   @db.VarChar(255)
+  app_fees_payt_date                     DateTime? @db.Date
+  eft_attachment                         String?   @db.VarChar(255)
+  bank_name                              String?   @db.VarChar(255)
+  application_ref_no                     String?   @db.VarChar(255)
+  application_ref_date                   DateTime? @db.Date
+  cac                                    DateTime? @db.Date
+  cac_attachment                         String?   @db.VarChar(255)
+  cec                                    DateTime? @db.Date
+  cec_attachment                         String?   @db.VarChar(255)
+  no_of_cac                              String?   @db.VarChar(255)
+  no_of_cec                              String?   @db.VarChar(255)
+  submission_target_date                 DateTime? @db.Date
+  submission_date                        DateTime? @db.Date
+  acknowlegment                          String?   @db.VarChar(255)
+  submitted_to                           String?   @db.VarChar(255)
+  file_no                                String?   @db.VarChar(255)
+  file_date                              DateTime? @db.Date
+  job_verification_target_date          DateTime? @db.Date
+  job_verification_date                  DateTime? @db.Date
+  sanction_approval_target_date          DateTime? @db.Date
+  sanction___approval_date               DateTime? @db.Date
+  authorisation_no                       String?   @db.VarChar(255)
+  duty_credit_scrip_no                   String?   @db.VarChar(255)
+  license_no                             String?   @db.VarChar(255)
+  certificate_no                         String?   @db.VarChar(255)
+  refund_sanction_order_no               String?   @db.VarChar(255)
+  brand_rate_letter_no                   String?   @db.VarChar(255)
+  lic_scrip_order_cert_amendment_no     String?   @db.VarChar(255)
+  date                                   String?   @db.VarChar(255)
+  refund_order_license_approval_brl_certificate_attachment String? @db.VarChar(255)
+  duty_credit_refund_sanctioned_exempted_amount String? @db.VarChar(255)
+  license_registration_target_date       DateTime? @db.Date
+  license_registration_date              DateTime? @db.Date
+  import_date                            DateTime? @db.Date
+  actual_duty_credit_refund_sanctioned_amount String? @db.VarChar(255)
+  normal_retro                           String?   @db.VarChar(255)
+  cus_clearance                          String?   @db.VarChar(255)
+  type_of_ims                             String?   @db.VarChar(255)
+  bis                                     String?   @db.VarChar(255)
+  ims                                     String?   @db.VarChar(255)
+  scomet                                  String?   @db.VarChar(255)
+  inv_no                                  String?   @db.VarChar(255)
+  inv_date                                DateTime? @db.Date
+  dbk_claim_no                            String?   @db.VarChar(255)
+  dbk_claim_date                          DateTime? @db.Date
+  ref__no                                 String?   @db.VarChar(255)
+  ref__date                               DateTime? @db.Date
+  remark                                  String?   @db.Text
+  status                                  JobStatus?
+  invoice_ready                           InvoiceReady?
+  form_field_json_data                    String?   @db.Text
+  job_id_status                           JobIdStatus?
+  created_at                              DateTime? @default(now()) @db.DateTime(0)
+  updated_at                              DateTime? @db.DateTime(0)
+  deleted_at                              DateTime? @db.DateTime(0)
+  added_by                                Int?
+  deleted_by                              Int?
+
+  jobRegister         JobRegister?        @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobRegisterField    JobRegisterField?   @relation(fields: [job_register_field_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser         User?               @relation("JobAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser       User?               @relation("JobDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobAttachments      JobAttachment[]
+  jobServiceCharges   JobServiceCharge[]
+
+  @@index([job_register_id], name: "idx_job_register_id")
+  @@index([job_register_field_id], name: "idx_job_register_field_id")
+  @@index([job_no], name: "idx_job_no")
+  @@index([po_no], name: "idx_po_no")
+  @@index([claim_no], name: "idx_claim_no")
+  @@index([job_date], name: "idx_job_date")
+  @@index([status], name: "idx_status")
+  @@index([invoice_ready], name: "idx_invoice_ready")
+  @@index([job_id_status], name: "idx_job_id_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@index([application_date], name: "idx_application_date")
+  @@index([submission_date], name: "idx_submission_date")
+  @@map("job")
+}
+
+enum JobStatus {
+  In_process
+  Closed
+}
+
+enum InvoiceReady {
+  true
+  false
+}
+
+enum JobIdStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Job Attachment
+model JobAttachment {
+  id              Int                  @id @default(autoincrement())
+  job_id          Int
+  attachment_type String?               @db.VarChar(255)
+  file_name       String?               @db.VarChar(255)
+  file_path       String?               @db.VarChar(255)
+  status          JobAttachmentStatus?
+  created_at      DateTime?             @default(now()) @db.DateTime(0)
+  deleted_at      DateTime?             @db.DateTime(0)
+  added_by        Int?
+  deleted_by      Int?
+
+  job             Job                  @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  addedByUser     User?                @relation("JobAttachmentAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser   User?                @relation("JobAttachmentDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([job_id], name: "idx_job_id")
+  @@index([attachment_type], name: "idx_attachment_type")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("job_attachment")
+}
+
+enum JobAttachmentStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Job Service Charges
+model JobServiceCharge {
+  id                        Int                      @id @default(autoincrement())
+  group_id                  String?                  @db.VarChar(255)
+  job_id                    Int?
+  client_name               String?                  @db.VarChar(255)
+  client_address            String?                  @db.Text
+  concern_person            String?                  @db.VarChar(255)
+  concern_email_id          String?                  @db.VarChar(255)
+  concern_phone_no          String?                  @db.VarChar(10)
+  gst_no                    String?                  @db.VarChar(255)
+  gst_type                  GstType?
+  min                       Float                    @default(0)
+  max                       Float                    @default(0)
+  in_percentage             Float                    @default(0)
+  fixed                     Float                    @default(0)
+  per_shb                   Float                    @default(0)
+  ca_charges                Float                    @default(0)
+  ce_charges                Float                    @default(0)
+  registration_other_charges Float                    @default(0)
+  invoice_description       String?                  @db.Text
+  percentage_per_shb        YesNo                    @default(No)
+  fixed_percentage_per_shb  YesNo                    @default(No)
+  remi_one_desc             String?                  @db.VarChar(255)
+  remi_one_charges          String?                  @db.VarChar(255)
+  remi_two_desc             String?                  @db.VarChar(255)
+  remi_two_charges          String?                  @db.VarChar(255)
+  remi_three_desc           String?                  @db.VarChar(255)
+  remi_three_charges        String?                  @db.VarChar(255)
+  remi_four_desc            String?                  @db.VarChar(255)
+  remi_four_charges         String?                  @db.VarChar(255)
+  remi_five_desc            String?                  @db.VarChar(255)
+  remi_five_charges         String?                  @db.VarChar(255)
+  status                    JobServiceChargeStatus?
+  created_at                DateTime?                 @default(now()) @db.DateTime(0)
+  updated_at                DateTime?                 @db.DateTime(0)
+  deleted_at                DateTime?                 @db.DateTime(0)
+  added_by                  Int?
+  deleted_by                Int?
+
+  job                       Job?                    @relation(fields: [job_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser               User?                    @relation("JobServiceChargeAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser              User?                    @relation("JobServiceChargeDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([group_id], name: "idx_group_id")
+  @@index([job_id], name: "idx_job_id")
+  @@index([gst_no], name: "idx_gst_no")
+  @@index([gst_type], name: "idx_gst_type")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("job_service_charges")
+}
+
+enum GstType {
+  SC
+  I
+  EXEMPTED
+}
+
+enum YesNo {
+  No
+  Yes
+}
+
+enum JobServiceChargeStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Client Service Charges
+model ClientServiceCharge {
+  id                        Int                        @id @default(autoincrement())
+  group_id                  String?                    @db.VarChar(255)
+  account_id                Int?
+  client_info_id            Int?
+  client_bu_id              Int?
+  job_register_id           Int?
+  concern_person             String?                    @db.VarChar(255)
+  concern_email_id          String?                    @db.VarChar(255)
+  concern_phone_no          String?                    @db.VarChar(10)
+  min                       Float                      @default(0)
+  max                       Float                      @default(0)
+  in_percentage             Float                      @default(0)
+  fixed                     Float                      @default(0)
+  per_shb                   Float                      @default(0)
+  ca_charges                Float                      @default(0)
+  ce_charges                Float                      @default(0)
+  other_charges             Float                      @default(0)
+  registration_other_charges Float                     @default(0)
+  reimbursement             String?                    @db.VarChar(255)
+  reimbursement_charges      Float                      @default(0)
+  remi_one_description      String?                    @db.VarChar(255)
+  remi_one_charges          String?                    @db.VarChar(255)
+  remi_two_description      String?                    @db.VarChar(255)
+  remi_two_charges          String?                    @db.VarChar(255)
+  remi_three_description    String?                    @db.VarChar(255)
+  remi_three_charges        String?                    @db.VarChar(255)
+  remi_four_description     String?                    @db.VarChar(255)
+  remi_four_charges         String?                    @db.VarChar(255)
+  invoice_description       String?                    @db.Text
+  percentage_per_shb        YesNo                      @default(No)
+  fixed_percentage_per_shb  YesNo                      @default(No)
+  status                    ClientServiceChargeStatus?
+  created_at                DateTime?                   @default(now()) @db.DateTime(0)
+  updated_at                DateTime?                  @db.DateTime(0)
+  deleted_at                DateTime?                   @db.DateTime(0)
+  added_by                  Int?
+  deleted_by                Int?
+
+  account                   Account?                   @relation(fields: [account_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientInfo                ClientInfo?                @relation(fields: [client_info_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientBu                  ClientBu?                 @relation(fields: [client_bu_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobRegister               JobRegister?               @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser               User?                     @relation("ClientServiceChargeAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser             User?                     @relation("ClientServiceChargeDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([group_id], name: "idx_group_id")
+  @@index([account_id], name: "idx_account_id")
+  @@index([client_info_id], name: "idx_client_info_id")
+  @@index([client_bu_id], name: "idx_client_bu_id")
+  @@index([job_register_id], name: "idx_job_register_id")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("client_service_charges")
+}
+
+enum ClientServiceChargeStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Invoices
+model Invoice {
+  id                          Int                    @id @default(autoincrement())
+  draft_view_id               String?                @db.VarChar(255)
+  performa_view_id             String?                @db.VarChar(255)
+  job_register_id              Int?
+  service_type                 String?                @db.VarChar(255)
+  invoice_type                 String?               @db.VarChar(255)
+  pay_amount                   String?               @db.VarChar(255)
+  amount                       String?                @db.VarChar(255)
+  professional_charges        Decimal?              @db.Decimal(10, 0) @default(0)
+  registration_other_charges   Decimal?              @db.Decimal(10, 0) @default(0)
+  ca_charges                   Decimal?              @db.Decimal(10, 0) @default(0)
+  ce_charges                   Decimal?              @db.Decimal(10, 0) @default(0)
+  ca_cert_count                Int?
+  ce_cert_count                Int?
+  application_fees             Decimal?               @db.Decimal(10, 0) @default(0)
+  remi_one_charges             Decimal?              @db.Decimal(10, 0) @default(0)
+  remi_two_charges             Decimal?              @db.Decimal(10, 0) @default(0)
+  remi_three_charges           Decimal?              @db.Decimal(10, 0) @default(0)
+  remi_four_charges            Decimal?              @db.Decimal(10, 0) @default(0)
+  remi_five_charges            String?               @db.VarChar(255)
+  reward_penalty_input         String?                @db.VarChar(255) @default("0")
+  reward_penalty_amount        Decimal?               @db.Decimal(10, 0) @default(0)
+  note                         String?               @db.Text
+  po_no                        String?               @db.VarChar(255)
+  irn_no                       String?              @db.VarChar(255)
+  status                       InvoiceStatus?
+  invoice_status               InvoiceStatusEnum?
+  invoice_stage_status         InvoiceStageStatus?
+  created_at                   DateTime?              @default(now()) @db.Timestamp(0)
+  canceled_at                  DateTime?             @db.DateTime(0)
+  added_by                     Int?
+  canceled_by                  Int?
+  performa_created_at          DateTime?             @db.DateTime(0)
+  performa_created_by           Int?
+  performa_canceled_at          DateTime?            @db.DateTime(0)
+  performa_canceled_by          Int?
+  credit_debit_note_number      String?               @db.VarChar(255)
+
+  jobRegister                  JobRegister?          @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  addedByUser                  User?                 @relation("InvoiceAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  canceledByUser               User?                 @relation("InvoiceCanceledBy", fields: [canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  performaCreatedByUser         User?                 @relation("InvoicePerformaCreatedBy", fields: [performa_created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  performaCanceledByUser        User?                 @relation("InvoicePerformaCanceledBy", fields: [performa_canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  invoiceSelectedJobs          InvoiceSelectedJob[]
+  invoiceAnnexures             InvoiceAnnexure[]
+
+  @@index([draft_view_id], name: "idx_draft_view_id")
+  @@index([performa_view_id], name: "idx_performa_view_id")
+  @@index([job_register_id], name: "idx_job_register_id")
+  @@index([po_no], name: "idx_po_no")
+  @@index([irn_no], name: "idx_irn_no")
+  @@index([status], name: "idx_status")
+  @@index([invoice_status], name: "idx_invoice_status")
+  @@index([invoice_stage_status], name: "idx_invoice_stage_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([canceled_by], name: "idx_canceled_by")
+  @@index([performa_created_by], name: "idx_performa_created_by")
+  @@index([performa_canceled_by], name: "idx_performa_canceled_by")
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  Open
+  Closed
+}
+
+enum InvoiceStatusEnum {
+  Active
+  InActive
+  Delete
+}
+
+enum InvoiceStageStatus {
+  Draft
+  Performa
+  Canceled
+}
+
+// Invoice Selected Jobs
+model InvoiceSelectedJob {
+  id          Int       @id @default(autoincrement())
+  invoice_id  Int?
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  created_by  Int?
+
+  invoice     Invoice?  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdByUser User?   @relation("InvoiceSelectedJobCreatedBy", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([invoice_id], name: "idx_invoice_id")
+  @@index([created_at], name: "idx_created_at")
+  @@index([created_by], name: "idx_created_by")
+  @@map("invoice_selected_jobs")
+}
+
+// Invoice Annexure
+model InvoiceAnnexure {
+  id                                    Int       @id @default(autoincrement())
+  invoice_id                            Int?
+  inv_ref_dbk_claim_no                  String?   @db.VarChar(255)
+  inv_ref_dbk_claim_date               DateTime? @db.Date
+  lic_script_order_autho_certi_no      String?   @db.VarChar(255)
+  lic_script_order_autho_certi_date    DateTime? @db.Date
+  duty_saved_duty_credit_amount         String?   @db.VarChar(255)
+  qty_uom                               String?   @db.VarChar(255)
+  created_at                            DateTime?  @default(now()) @db.DateTime(0)
+  created_by                            Int?
+  canceled_at                           DateTime?  @db.DateTime(0)
+  canceled_by                           Int?
+
+  invoice                               Invoice?   @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdByUser                         User?      @relation("InvoiceAnnexureCreatedBy", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  canceledByUser                        User?      @relation("InvoiceAnnexureCanceledBy", fields: [canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([invoice_id], name: "idx_invoice_id")
+  @@index([inv_ref_dbk_claim_no], name: "idx_inv_ref_dbk_claim_no")
+  @@index([created_at], name: "idx_created_at")
+  @@index([created_by], name: "idx_created_by")
+  @@index([canceled_by], name: "idx_canceled_by")
+  @@map("invoice_annexure")
+}
+
+enum FieldType {
+  Text
+  Date
+  Dropdown
+  Attachment
+  Number
+}
+
+enum FieldsMasterStatus {
+  Active
+  InActive
+  Delete
+}
+
+// Fields Master
+model FieldsMaster {
+  id              Int                  @id @default(autoincrement())
+  field_name      String?              @unique @db.VarChar(255)
+  field_type      FieldType?
+  default_value   Boolean?             @default(false)
+  treatment       String?              @db.Text
+  dropdown_options String?             @db.Text
+  status          FieldsMasterStatus?
+  created_at      DateTime?            @default(now()) @db.DateTime(0)
+  updated_at      DateTime?            @db.DateTime(0)
+  deleted_at      DateTime?            @db.DateTime(0)
+  added_by        Int?
+  deleted_by      Int?
+
+  addedByUser     User?                @relation("FieldsMasterAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser   User?                @relation("FieldsMasterDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([field_name], name: "idx_field_name")
+  @@index([field_type], name: "idx_field_type")
+  @@index([status], name: "idx_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("fields_master")
+}
+
+// Job Reports
+model JobReport {
+  id          Int              @id @default(autoincrement())
+  report_name String?          @db.VarChar(255)
+  status      String?          @db.Text
+  job_status  JobReportStatus?
+  account_ids String?          @db.Text
+  job_ids     String?          @db.Text
+  client_ids  String?          @db.Text
+  job_fields  String?          @db.Text
+  created_at DateTime?         @default(now()) @db.DateTime(0)
+  deleted_at DateTime?         @db.DateTime(0)
+  added_by   Int?
+  deleted_by Int?
+
+  addedByUser   User?          @relation("JobReportAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  deletedByUser User?          @relation("JobReportDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([report_name], name: "idx_report_name")
+  @@index([job_status], name: "idx_job_status")
+  @@index([created_at], name: "idx_created_at")
+  @@index([added_by], name: "idx_added_by")
+  @@index([deleted_by], name: "idx_deleted_by")
+  @@map("job_reports")
+}
+
+enum JobReportStatus {
+  Active
+  Delete
+}
+
+// User Settings
+model UserSettings {
+  user_id    Int      @id
+  font       String?  @db.VarChar(100)
+  theme      String?  @db.VarChar(100)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(0)
+
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("user_settings")
+}
+
