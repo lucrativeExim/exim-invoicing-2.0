@@ -9,7 +9,8 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME || 'exim_invoicing',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  timezone: process.env.DB_TIMEZONE || '+05:30' // IST timezone for India
 });
 
 // Get a Promise based pool

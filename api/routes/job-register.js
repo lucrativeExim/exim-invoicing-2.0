@@ -6,8 +6,8 @@ const { authenticate, requireRole } = require('../middleware/accessControl');
 // All routes require authentication
 router.use(authenticate);
 
-// Get all job registers - Only Super Admin and Admin can access
-router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+// Get all job registers - All authenticated users can access (for job creation dropdown)
+router.get('/', async (req, res) => {
   try {
     const { activeOnly } = req.query;
     const jobRegisters = await JobRegister.findAll({ 

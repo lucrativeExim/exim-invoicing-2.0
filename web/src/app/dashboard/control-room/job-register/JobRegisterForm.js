@@ -27,13 +27,14 @@ export default function JobRegisterForm({
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <form onSubmit={onSubmit}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Input
             label="Job Code"
             name="job_code"
             value={formData.job_code}
             onChange={onChange}
             error={errors.job_code}
+            required
             placeholder="Enter job code"
           />
           
@@ -92,7 +93,7 @@ export default function JobRegisterForm({
         {/* Remi Descriptions Section */}
         <div className="mb-4">
           <h3 className="text-md font-semibold text-gray-900 mb-4">Remi Descriptions</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Input
               label="Remi One Description"
               name="remi_one_desc"

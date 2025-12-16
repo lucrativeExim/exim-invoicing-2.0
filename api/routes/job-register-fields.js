@@ -6,6 +6,24 @@ const { authenticate, requireRole } = require('../middleware/accessControl');
 // All routes require authentication
 router.use(authenticate);
 
+// Get active job register field for a job register - All authenticated users can access (for job creation)
+// NOTE: This route must come BEFORE /:id to avoid routing conflicts
+router.get('/job-register/:jobRegisterId/active', async (req, res) => {
+  try {
+    const { jobRegisterId } = req.params;
+    const jobRegisterField = await JobRegisterField.findActiveByJobRegisterId(jobRegisterId);
+    
+    if (!jobRegisterField) {
+      return res.status(404).json({ error: 'Active job register field not found' });
+    }
+    
+    res.json(jobRegisterField);
+  } catch (error) {
+    console.error('Error fetching active job register field:', error);
+    res.status(500).json({ error: 'Failed to fetch active job register field' });
+  }
+});
+
 // Get all job register fields - Only Super Admin and Admin can access
 router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
@@ -35,23 +53,6 @@ router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   } catch (error) {
     console.error('Error fetching job register field:', error);
     res.status(500).json({ error: 'Failed to fetch job register field' });
-  }
-});
-
-// Get active job register field for a job register - Only Super Admin and Admin can access
-router.get('/job-register/:jobRegisterId/active', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
-  try {
-    const { jobRegisterId } = req.params;
-    const jobRegisterField = await JobRegisterField.findActiveByJobRegisterId(jobRegisterId);
-    
-    if (!jobRegisterField) {
-      return res.status(404).json({ error: 'Active job register field not found' });
-    }
-    
-    res.json(jobRegisterField);
-  } catch (error) {
-    console.error('Error fetching active job register field:', error);
-    res.status(500).json({ error: 'Failed to fetch active job register field' });
   }
 });
 
@@ -170,4 +171,3 @@ router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
 });
 
 module.exports = router;
-

@@ -43,6 +43,12 @@ const accountsRoutes = require('./routes/accounts');
 const gstRatesRoutes = require('./routes/gst-rates');
 const fieldsMasterRoutes = require('./routes/fields-master');
 const jobRegisterFieldsRoutes = require('./routes/job-register-fields');
+const clientInfoRoutes = require('./routes/client-info');
+const clientBuRoutes = require('./routes/client-bu');
+const clientServiceChargesRoutes = require('./routes/client-service-charges');
+const statesRoutes = require('./routes/states');
+const jobsRoutes = require('./routes/jobs');
+
 app.use('/api/users', usersRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/job-register', jobRegisterRoutes);
@@ -50,6 +56,11 @@ app.use('/api/accounts', accountsRoutes);
 app.use('/api/gst-rates', gstRatesRoutes);
 app.use('/api/fields-master', fieldsMasterRoutes);
 app.use('/api/job-register-fields', jobRegisterFieldsRoutes);
+app.use('/api/client-info', clientInfoRoutes);
+app.use('/api/client-bu', clientBuRoutes);
+app.use('/api/client-service-charges', clientServiceChargesRoutes);
+app.use('/api/states', statesRoutes);
+app.use('/api/jobs', jobsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
