@@ -76,6 +76,34 @@ class FieldsMasterModel {
   }
 
   /**
+   * Get Fields Master by multiple field names (bulk fetch)
+   */
+  async findByFieldNames(fieldNames) {
+    if (!Array.isArray(fieldNames) || fieldNames.length === 0) {
+      return [];
+    }
+    return await prisma.fieldsMaster.findMany({
+      where: {
+        field_name: {
+          in: fieldNames,
+        },
+        deleted_at: null,
+      },
+      select: {
+        id: true,
+        field_name: true,
+        field_type: true,
+        default_value: true,
+        treatment: true,
+        dropdown_options: true,
+        status: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+  }
+
+  /**
    * Check if field name exists
    */
   async fieldNameExists(field_name, excludeId = null) {

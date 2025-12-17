@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/services/authService';
 import { accessControl } from '@/services/accessControl';
@@ -32,6 +32,32 @@ export default function UsersPage() {
   const [errors, setErrors] = useState({});
   const { toast, success, error: showError, hideToast } = useToast();
 
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const response = await api.get('/users');
+      setUsers(response.data);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      showError(err.response?.data?.error || 'Failed to fetch users');
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [showError]);
+
+  const fetchJobRegisters = useCallback(async () => {
+    setJobRegistersLoading(true);
+    try {
+      const response = await api.get('/job-register?activeOnly=true');
+      setJobRegisters(response.data);
+    } catch (err) {
+      console.error('Error fetching job registers:', err);
+      showError(err.response?.data?.error || 'Failed to fetch job registers');
+    } finally {
+      setJobRegistersLoading(false);
+    }
+  }, [showError]);
+
   useEffect(() => {
     // Check if user has permission to access this page
     if (!accessControl.canManageUsers()) {
@@ -44,33 +70,7 @@ export default function UsersPage() {
     // Fetch users and job registers
     fetchUsers();
     fetchJobRegisters();
-  }, [router]);
-
-  const fetchUsers = async () => {
-    setUsersLoading(true);
-    try {
-      const response = await api.get('/users');
-      setUsers(response.data);
-    } catch (err) {
-      console.error('Error fetching users:', err);
-      showError(err.response?.data?.error || 'Failed to fetch users');
-    } finally {
-      setUsersLoading(false);
-    }
-  };
-
-  const fetchJobRegisters = async () => {
-    setJobRegistersLoading(true);
-    try {
-      const response = await api.get('/job-register?activeOnly=true');
-      setJobRegisters(response.data);
-    } catch (err) {
-      console.error('Error fetching job registers:', err);
-      showError(err.response?.data?.error || 'Failed to fetch job registers');
-    } finally {
-      setJobRegistersLoading(false);
-    }
-  };
+  }, [router, fetchUsers, fetchJobRegisters]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -391,14 +391,17 @@ export default function UsersPage() {
                             : 'N/A'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <Button
+                          <button
                             type="button"
-                            variant="outline"
                             onClick={() => handleEdit(userItem)}
-                            className="text-sm"
+                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
+                            title="Edit"
+                            aria-label="Edit user"
                           >
-                            Edit
-                          </Button>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
                         </td>
                       </tr>
                     ))}

@@ -18,13 +18,14 @@ export default function UserForm({
         {editingUserId ? 'Edit User' : 'Add New User'}
       </h2>
       <form onSubmit={onSubmit}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Input
             label="First Name"
             name="first_name"
             value={formData.first_name}
             onChange={onChange}
             error={errors.first_name}
+            required
           />
           <Input
             label="Last Name"
@@ -32,6 +33,7 @@ export default function UserForm({
             value={formData.last_name}
             onChange={onChange}
             error={errors.last_name}
+            required
           />
           <Input
             label="Email"
@@ -88,6 +90,7 @@ export default function UserForm({
             error={errors.password}
             required={!editingUserId}
             placeholder={editingUserId ? 'Leave blank to keep current password' : ''}
+            showPasswordToggle
           />
           <SelectBox
             label="Job Registers"

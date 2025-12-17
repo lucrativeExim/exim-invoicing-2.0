@@ -10,11 +10,13 @@ const JobRegister = require('./JobRegister');
 const Account = require('./Account');
 const FieldsMaster = require('./FieldsMaster');
 const JobRegisterField = require('./JobRegisterField');
+const ClientInfo = require('./ClientInfo');
+const ClientBu = require('./ClientBu');
+const ClientServiceCharge = require('./ClientServiceCharge');
+const Job = require('./Job');
+const JobServiceCharge = require('./JobServiceCharge');
 
 // Add more models as you create them
-// const ClientInfo = require('./ClientInfo');
-// const ClientBu = require('./ClientBu');
-// const Job = require('./Job');
 // const Invoice = require('./Invoice');
 // etc...
 
@@ -26,9 +28,11 @@ module.exports = {
   Account,
   FieldsMaster,
   JobRegisterField,
-  // ClientInfo,
-  // ClientBu,
-  // Job,
+  ClientInfo,
+  ClientBu,
+  ClientServiceCharge,
+  Job,
+  JobServiceCharge,
   // Invoice,
 };
 

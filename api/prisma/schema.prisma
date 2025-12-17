@@ -181,6 +181,7 @@ model ClientInfo {
   deletedByUser   User?               @relation("ClientInfoDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   clientBus       ClientBu[]
   clientServiceCharges ClientServiceCharge[]
+  jobs            Job[]
 
   @@index([account_id], name: "idx_account_id")
   @@index([client_name], name: "idx_client_name")
@@ -224,6 +225,7 @@ model ClientBu {
   addedByUser   User?              @relation("ClientBuAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   deletedByUser User?              @relation("ClientBuDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   clientServiceCharges ClientServiceCharge[]
+  jobs          Job[]
 
   @@index([client_info_id], name: "idx_client_info_id")
   @@index([state_id], name: "idx_state_id")
@@ -325,6 +327,8 @@ model Job {
   job_register_id                        Int?
   job_no                                 String?   @db.VarChar(255)
   job_register_field_id                  Int?
+  client_info_id                         Int?
+  client_bu_id                           Int?
   type_of_unit                           String?   @db.VarChar(255)
   job_owner                              String?   @db.VarChar(255)
   job_owner_email_id                     String?   @db.VarChar(255)
@@ -404,6 +408,8 @@ model Job {
 
   jobRegister         JobRegister?        @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   jobRegisterField    JobRegisterField?   @relation(fields: [job_register_field_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientInfo          ClientInfo?          @relation(fields: [client_info_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  clientBu            ClientBu?            @relation(fields: [client_bu_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   addedByUser         User?               @relation("JobAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   deletedByUser       User?               @relation("JobDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   jobAttachments      JobAttachment[]
@@ -411,6 +417,8 @@ model Job {
 
   @@index([job_register_id], name: "idx_job_register_id")
   @@index([job_register_field_id], name: "idx_job_register_field_id")
+  @@index([client_info_id], name: "idx_client_info_id")
+  @@index([client_bu_id], name: "idx_client_bu_id")
   @@index([job_no], name: "idx_job_no")
   @@index([po_no], name: "idx_po_no")
   @@index([claim_no], name: "idx_claim_no")
@@ -564,18 +572,7 @@ model ClientServiceCharge {
   per_shb                   Float                      @default(0)
   ca_charges                Float                      @default(0)
   ce_charges                Float                      @default(0)
-  other_charges             Float                      @default(0)
   registration_other_charges Float                     @default(0)
-  reimbursement             String?                    @db.VarChar(255)
-  reimbursement_charges      Float                      @default(0)
-  remi_one_description      String?                    @db.VarChar(255)
-  remi_one_charges          String?                    @db.VarChar(255)
-  remi_two_description      String?                    @db.VarChar(255)
-  remi_two_charges          String?                    @db.VarChar(255)
-  remi_three_description    String?                    @db.VarChar(255)
-  remi_three_charges        String?                    @db.VarChar(255)
-  remi_four_description     String?                    @db.VarChar(255)
-  remi_four_charges         String?                    @db.VarChar(255)
   invoice_description       String?                    @db.Text
   percentage_per_shb        YesNo                      @default(No)
   fixed_percentage_per_shb  YesNo                      @default(No)

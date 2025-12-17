@@ -79,22 +79,69 @@ const SelectBox = ({
   const customStyles = {
     control: (base, state) => ({
       ...base,
-      minHeight: '42px',
+      minHeight: '36px',
+      height: '36px',
+      padding: '0',
+      paddingLeft: '12px',
+      paddingRight: '8px',
       borderColor: error ? '#ef4444' : state.isFocused ? '#3b82f6' : '#d1d5db',
       borderRadius: '0.5rem',
       boxShadow: state.isFocused && !error ? '0 0 0 2px rgba(59, 130, 246, 0.5)' : 'none',
+      fontSize: '0.875rem',
       '&:hover': {
         borderColor: error ? '#ef4444' : '#3b82f6',
       },
     }),
+    valueContainer: (base) => ({
+      ...base,
+      padding: '0',
+      height: '100%',
+    }),
+    input: (base) => ({
+      ...base,
+      margin: '0',
+      padding: '0',
+      fontSize: '0.875rem',
+    }),
+    singleValue: (base) => ({
+      ...base,
+      margin: '0',
+      fontSize: '0.875rem',
+    }),
     placeholder: (base) => ({
       ...base,
       color: '#9ca3af',
+      margin: '0',
+      fontSize: '0.875rem',
+    }),
+    indicatorsContainer: (base) => ({
+      ...base,
+      height: '100%',
+    }),
+    indicatorSeparator: () => ({
+      display: 'none',
+    }),
+    dropdownIndicator: (base) => ({
+      ...base,
+      padding: '4px',
+      svg: {
+        width: '16px',
+        height: '16px',
+      },
+    }),
+    clearIndicator: (base) => ({
+      ...base,
+      padding: '4px',
+      svg: {
+        width: '16px',
+        height: '16px',
+      },
     }),
     menu: (base) => ({
       ...base,
       borderRadius: '0.5rem',
       boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+      fontSize: '0.875rem',
     }),
     option: (base, state) => {
       // For multi-select, use lighter background for selected items
@@ -123,9 +170,9 @@ const SelectBox = ({
   };
 
   return (
-    <div className={`mb-4 ${className}`}>
+    <div className={`mb-2 ${className}`}>
       {label && (
-        <label htmlFor={name} className="block text-sm font-medium text-gray-700 mb-2">
+        <label htmlFor={name} className="block text-sm font-medium text-gray-700 mb-1">
           {label}
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
@@ -147,7 +194,7 @@ const SelectBox = ({
         classNamePrefix="react-select"
         {...props}
       />
-      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-red-600">{error}</p>}
     </div>
   );
 };

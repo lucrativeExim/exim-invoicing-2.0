@@ -183,46 +183,58 @@ export default function JobRegisterPage() {
                         : 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
+                      <div className="flex items-center space-x-2">
                         <Link href={`/dashboard/control-room/job-register/edit/${jobRegister.id}`}>
-                          <Button
+                          <button
                             type="button"
-                            variant="outline"
-                            className="text-sm"
+                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
+                            title="Edit"
+                            aria-label="Edit job register"
                           >
-                            Edit
-                          </Button>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
                         </Link>
                         {accessControl.isSuperAdmin() && (
                           <>
                             {deleteConfirmId === jobRegister.id ? (
-                              <>
-                                <Button
+                              <div className="flex items-center space-x-1">
+                                <button
                                   type="button"
-                                  variant="outline"
                                   onClick={() => handleDelete(jobRegister.id)}
-                                  className="text-sm text-red-600 border-red-600 hover:bg-red-50"
+                                  className="p-1.5 rounded-md hover:bg-green-50 transition-colors text-green-600"
+                                  title="Confirm Delete"
+                                  aria-label="Confirm delete"
                                 >
-                                  Confirm
-                                </Button>
-                                <Button
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </button>
+                                <button
                                   type="button"
-                                  variant="outline"
                                   onClick={() => setDeleteConfirmId(null)}
-                                  className="text-sm"
+                                  className="p-1.5 rounded-md hover:bg-gray-100 transition-colors text-gray-600"
+                                  title="Cancel"
+                                  aria-label="Cancel delete"
                                 >
-                                  Cancel
-                                </Button>
-                              </>
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </div>
                             ) : (
-                              <Button
+                              <button
                                 type="button"
-                                variant="outline"
                                 onClick={() => setDeleteConfirmId(jobRegister.id)}
-                                className="text-sm text-red-600 border-red-600 hover:bg-red-50"
+                                className="p-1.5 rounded-md hover:bg-red-50 transition-colors text-red-600"
+                                title="Delete"
+                                aria-label="Delete job register"
                               >
-                                Delete
-                              </Button>
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
                             )}
                           </>
                         )}

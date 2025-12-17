@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { authService } from '@/services/authService';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import { AccountProvider } from '@/context/AccountContext';
+import { PageTitleProvider } from '@/context/PageTitleContext';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -41,21 +43,23 @@ export default function DashboardLayout({ children }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <Sidebar isCollapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+    <AccountProvider>
+      <div className="min-h-screen bg-gray-50 flex">
+        {/* Sidebar */}
+        <Sidebar isCollapsed={sidebarCollapsed} onToggle={toggleSidebar} />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <Header user={user} />
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Header */}
+          <Header user={user} />
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-4">
-          {children}
-        </main>
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto p-4">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </AccountProvider>
   );
 }
 

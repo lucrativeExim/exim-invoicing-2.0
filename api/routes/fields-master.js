@@ -6,6 +6,64 @@ const { authenticate, requireRole } = require('../middleware/accessControl');
 // All routes require authentication
 router.use(authenticate);
 
+// Get Fields Master by multiple field names (bulk fetch) - All authenticated users can access (for job form fields)
+// IMPORTANT: This route must come before /by-name/:fieldName to avoid route conflicts
+router.post('/by-names', async (req, res) => {
+  try {
+    console.log('POST /api/fields-master/by-names - Request received');
+    const { fieldNames } = req.body;
+    
+    if (!Array.isArray(fieldNames) || fieldNames.length === 0) {
+      console.log('No field names provided, returning empty map');
+      return res.json({});
+    }
+    
+    console.log(`Fetching fields master for ${fieldNames.length} field names:`, fieldNames);
+    const fields = await FieldsMaster.findByFieldNames(fieldNames);
+    console.log(`Found ${fields.length} fields in database`);
+    
+    // Parse JSON fields for response and create a map by field_name
+    const fieldsMap = {};
+    fields.forEach(field => {
+      fieldsMap[field.field_name] = {
+        ...field,
+        treatment: field.treatment ? (field.treatment.startsWith('[') ? JSON.parse(field.treatment) : field.treatment.split(',').filter(Boolean)) : [],
+        dropdown_options: field.dropdown_options ? (field.dropdown_options.startsWith('[') ? JSON.parse(field.dropdown_options) : field.dropdown_options.split(',').filter(Boolean)) : [],
+      };
+    });
+    
+    console.log(`Returning fields map with ${Object.keys(fieldsMap).length} entries`);
+    res.json(fieldsMap);
+  } catch (error) {
+    console.error('Error fetching Fields by names:', error);
+    res.status(500).json({ error: 'Failed to fetch Fields', details: error.message });
+  }
+});
+
+// Get Fields Master by field name - All authenticated users can access (for job form fields)
+router.get('/by-name/:fieldName', async (req, res) => {
+  try {
+    const { fieldName } = req.params;
+    const field = await FieldsMaster.findByFieldName(fieldName);
+    
+    if (!field) {
+      return res.status(404).json({ error: 'Field not found' });
+    }
+    
+    // Parse JSON fields for response
+    const parsedField = {
+      ...field,
+      treatment: field.treatment ? (field.treatment.startsWith('[') ? JSON.parse(field.treatment) : field.treatment.split(',').filter(Boolean)) : [],
+      dropdown_options: field.dropdown_options ? (field.dropdown_options.startsWith('[') ? JSON.parse(field.dropdown_options) : field.dropdown_options.split(',').filter(Boolean)) : [],
+    };
+    
+    res.json(parsedField);
+  } catch (error) {
+    console.error('Error fetching Field by name:', error);
+    res.status(500).json({ error: 'Failed to fetch Field' });
+  }
+});
+
 // Get all Fields Master records - Only Super Admin and Admin can access
 router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {

@@ -22,6 +22,7 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
+  rectSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -61,6 +62,11 @@ export default function JobRegisterPage({ mode = 'add' }) {
     status: 'Active',
   });
   const [errors, setErrors] = useState({});
+  // State for tracking Yes fields order (for Job Fields tab sorting)
+  const [yesFieldsOrder, setYesFieldsOrder] = useState([]);
+  // State for Arrange Form tab
+  const [arrangeFormOrder, setArrangeFormOrder] = useState([]);
+  const [initialArrangeFormOrder, setInitialArrangeFormOrder] = useState([]);
   const { toast, success, error: showError, hideToast } = useToast();
 
   useEffect(() => {
@@ -91,6 +97,21 @@ export default function JobRegisterPage({ mode = 'add' }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldsMaster, savedJobRegisterFields, isEditMode]);
+
+  // Initialize arrange form order only for NEW job registers (not edit mode with saved data)
+  // Edit mode with saved data is handled in loadSavedFieldsConfiguration
+  useEffect(() => {
+    if (!isEditMode && fieldsMaster.length > 0 && Object.keys(selectedFields).length > 0 && arrangeFormOrder.length === 0) {
+      // Only for NEW job registers - sort alphabetically by field name (ASC order)
+      const activeFields = fieldsMaster
+        .filter(field => selectedFields[field.id] || field.default_value === true)
+        .sort((a, b) => (a.field_name || '').localeCompare(b.field_name || ''))
+        .map(field => field.id);
+      
+      setArrangeFormOrder(activeFields);
+      setInitialArrangeFormOrder(activeFields);
+    }
+  }, [isEditMode, fieldsMaster, selectedFields]);
 
   const fetchJobRegister = async () => {
     try {
@@ -170,14 +191,20 @@ export default function JobRegisterPage({ mode = 'add' }) {
       const initialBillingFields = {};
       const initialMailSubjects = {};
       const initialMailBodies = {};
+      const initialYesFieldsOrder = [];
       fieldsMaster.forEach((field) => {
-        initialSelectedFields[field.id] = field.default_value === true;
+        const isSelected = field.default_value === true;
+        initialSelectedFields[field.id] = isSelected;
         initialMailTemplateFields[field.id] = 'no';
         initialBillingFields[field.id] = 'no';
         initialMailSubjects[field.id] = '';
         initialMailBodies[field.id] = '';
+        if (isSelected) {
+          initialYesFieldsOrder.push(field.id);
+        }
       });
       setSelectedFields(initialSelectedFields);
+      setYesFieldsOrder(initialYesFieldsOrder);
       setMailTemplateFields(initialMailTemplateFields);
       setBillingFields(initialBillingFields);
       setMailSubjects(initialMailSubjects);
@@ -243,7 +270,23 @@ export default function JobRegisterPage({ mode = 'add' }) {
       }
     });
     
+    // Build yesFieldsOrder and arrangeFormOrder from saved fields order (use database order)
+    const loadedYesFieldsOrder = [];
+    const loadedArrangeFormOrder = [];
+    
+    // Use the saved field order from database for Yes fields
+    savedJobRegisterFields.forEach((savedField) => {
+      const fieldId = fieldNameToIdMap[savedField.name];
+      if (fieldId && loadedSelectedFields[fieldId]) {
+        loadedYesFieldsOrder.push(fieldId);
+        loadedArrangeFormOrder.push(fieldId);
+      }
+    });
+    
     setSelectedFields(loadedSelectedFields);
+    setYesFieldsOrder(loadedYesFieldsOrder);
+    setArrangeFormOrder(loadedArrangeFormOrder);
+    setInitialArrangeFormOrder(loadedArrangeFormOrder);
     setMailTemplateFields(loadedMailTemplateFields);
     setBillingFields(loadedBillingFields);
     setMailSubjects(loadedMailSubjects);
@@ -283,18 +326,24 @@ export default function JobRegisterPage({ mode = 'add' }) {
         const initialBillingFields = {};
         const initialMailSubjects = {};
         const initialMailBodies = {};
+        const initialYesFieldsOrder = [];
         fields.forEach((field) => {
-          initialSelectedFields[field.id] = field.default_value === true;
+          const isSelected = field.default_value === true;
+          initialSelectedFields[field.id] = isSelected;
           // Initialize mail template and billing to 'no' by default
           initialMailTemplateFields[field.id] = 'no';
           initialBillingFields[field.id] = 'no';
           initialMailSubjects[field.id] = '';
           initialMailBodies[field.id] = '';
+          if (isSelected) {
+            initialYesFieldsOrder.push(field.id);
+          }
         });
         console.log('Initial Selected Fields:', initialSelectedFields);
         console.log('Initial Mail Template Fields:', initialMailTemplateFields);
         console.log('Initial Billing Fields:', initialBillingFields);
         setSelectedFields(initialSelectedFields);
+        setYesFieldsOrder(initialYesFieldsOrder);
         setMailTemplateFields(initialMailTemplateFields);
         setBillingFields(initialBillingFields);
         setMailSubjects(initialMailSubjects);
@@ -635,62 +684,20 @@ export default function JobRegisterPage({ mode = 'add' }) {
     );
   };
 
-  // Sortable Row Component
-  const SortableRow = ({ field, isDefault, isSelected, useFieldValue, hasMailTemplate, mailTemplateValue, isMailTemplateEnabled, hasBilling, billingValue, isBillingEnabled, handleFieldChange, handleMailTemplateChange, handleBillingChange, USE_FIELD_OPTIONS, MAIL_TEMPLATE_OPTIONS, BILLING_OPTIONS, mailSubject, mailBody, onOpenMailModal }) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging,
-    } = useSortable({ id: field.id });
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-      opacity: isDragging ? 0.5 : 1,
-    };
-
+  // Table Row Component for Job Fields (no drag and drop)
+  const TableRow = ({ field, isDefault, isSelected, useFieldValue, hasMailTemplate, mailTemplateValue, isMailTemplateEnabled, hasBilling, billingValue, isBillingEnabled, handleFieldChange, handleMailTemplateChange, handleBillingChange, USE_FIELD_OPTIONS, MAIL_TEMPLATE_OPTIONS, BILLING_OPTIONS, mailSubject, mailBody, onOpenMailModal }) => {
     return (
-      <tr
-        ref={setNodeRef}
-        style={style}
-        className={`hover:bg-gray-50 ${isDragging ? 'bg-gray-100' : ''}`}
-      >
+      <tr className="hover:bg-gray-50">
         <td className="px-6 py-4 whitespace-nowrap">
-          <div className="flex items-center gap-2">
-            <button
-              {...attributes}
-              {...listeners}
-              className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 focus:outline-none"
-              aria-label="Drag to reorder"
-              style={{ marginRight: '20px' }}
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 8h16M4 16h16"
-                />
-              </svg>
-            </button>
-            <div className="text-sm font-medium text-gray-900">
-              {field.field_name || 'N/A'}
-              {isDefault && (
-                <span className="ml-2 text-xs text-gray-400 font-normal">(Default)</span>
-              )}
-              <br />
-              {field.treatment && (
-                <span className="ml-2 text-xs text-gray-400 font-normal">({field.treatment})</span>
-              )}
-            </div>
+          <div className="text-sm font-medium text-gray-900">
+            {field.field_name || 'N/A'}
+            {isDefault && (
+              <span className="ml-2 text-xs text-gray-400 font-normal">(Default)</span>
+            )}
+            <br />
+            {field.treatment && (
+              <span className="ml-2 text-xs text-gray-400 font-normal">({field.treatment})</span>
+            )}
           </div>
         </td>
         <td className="px-6 py-4">
@@ -782,15 +789,6 @@ export default function JobRegisterPage({ mode = 'add' }) {
 
   // Job Fields Tab Content
   const JobFieldsTab = () => {
-   
-    
-    const sensors = useSensors(
-      useSensor(PointerSensor),
-      useSensor(KeyboardSensor, {
-        coordinateGetter: sortableKeyboardCoordinates,
-      })
-    );
-    
     const USE_FIELD_OPTIONS = [
       { value: 'yes', label: 'Yes' },
       { value: 'no', label: 'No' },
@@ -806,18 +804,53 @@ export default function JobRegisterPage({ mode = 'add' }) {
       { value: 'no', label: 'No' },
     ];
     
-    // Sort fields based on orderedFields
-    const sortedFields = [...fieldsMaster].sort((a, b) => {
-      const indexA = orderedFields.indexOf(a.id);
-      const indexB = orderedFields.indexOf(b.id);
+    // Sort fields by Use Field status: Yes first (at top), then No (at bottom)
+    // Both groups sorted alphabetically (ASC), newly changed Yes fields appear at bottom of Yes section
+    const sortedFields = (() => {
+      // Separate fields into Yes and No groups
+      const existingYesFields = []; // Fields that were already Yes (sorted alphabetically)
+      const newYesFields = []; // Fields newly changed to Yes (appear at bottom)
+      const noFields = [];
       
-      // If field not in orderedFields, put it at the end
-      if (indexA === -1 && indexB === -1) return 0;
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
+      // Sort alphabetically helper
+      const sortByName = (a, b) => (a.field_name || '').localeCompare(b.field_name || '');
       
-      return indexA - indexB;
-    });
+      fieldsMaster.forEach((field) => {
+        const isSelected = selectedFields[field.id] || field.default_value === true;
+        if (isSelected) {
+          // Check if this field was recently added to yesFieldsOrder (newly selected)
+          const isNewlySelected = yesFieldsOrder.includes(field.id) && 
+            yesFieldsOrder.indexOf(field.id) === yesFieldsOrder.length - 1 &&
+            yesFieldsOrder.length > 0;
+          
+          if (yesFieldsOrder.includes(field.id)) {
+            // Keep track of order - fields added later appear at the end
+            existingYesFields.push({ field, orderIndex: yesFieldsOrder.indexOf(field.id) });
+          } else {
+            // Default Yes fields (sorted alphabetically at top)
+            existingYesFields.push({ field, orderIndex: -1 });
+          }
+        } else {
+          noFields.push(field);
+        }
+      });
+      
+      // Sort existing Yes fields: first by orderIndex (default fields first), then alphabetically within same order
+      existingYesFields.sort((a, b) => {
+        if (a.orderIndex === -1 && b.orderIndex === -1) {
+          return sortByName(a.field, b.field);
+        }
+        if (a.orderIndex === -1) return -1;
+        if (b.orderIndex === -1) return -1;
+        return a.orderIndex - b.orderIndex;
+      });
+      
+      // Sort No fields alphabetically
+      noFields.sort(sortByName);
+      
+      // Return Yes fields first, then No fields
+      return [...existingYesFields.map(item => item.field), ...noFields];
+    })();
     
     const handleFieldChange = (fieldId, value, isDefault) => {
       // Don't allow changing if it's a default field
@@ -829,8 +862,31 @@ export default function JobRegisterPage({ mode = 'add' }) {
         [fieldId]: isUseFieldYes,
       }));
 
-      // If Use Field is changed to No, reset Mail Template and Billing to No
-      if (!isUseFieldYes) {
+      // Update yesFieldsOrder to track selection order
+      if (isUseFieldYes) {
+        // Add to end of Yes fields order (if not already there)
+        setYesFieldsOrder((prev) => {
+          if (!prev.includes(fieldId)) {
+            return [...prev, fieldId];
+          }
+          return prev;
+        });
+        
+        // Also add to end of Arrange Form order (newly selected Yes fields appear at end)
+        setArrangeFormOrder((prev) => {
+          if (!prev.includes(fieldId)) {
+            return [...prev, fieldId];
+          }
+          return prev;
+        });
+      } else {
+        // Remove from Yes fields order
+        setYesFieldsOrder((prev) => prev.filter(id => id !== fieldId));
+        
+        // Remove from Arrange Form order
+        setArrangeFormOrder((prev) => prev.filter(id => id !== fieldId));
+        
+        // Reset Mail Template and Billing to No
         setMailTemplateFields((prev) => ({
           ...prev,
           [fieldId]: 'no',
@@ -934,75 +990,356 @@ export default function JobRegisterPage({ mode = 'add' }) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
- 
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Field Name
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Use Field
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Mail Template
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Billing
-                    </th>
-                  </tr>
-                </thead>
-                <SortableContext
-                  items={orderedFields}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {sortedFields.map((field) => {
-                      const isDefault = field.default_value === true;
-                      const isSelected = selectedFields[field.id] || false;
-                      const useFieldValue = isSelected ? 'yes' : 'no';
-                      const hasMailTemplate = hasTextToMailTreatment(field.treatment);
-                      const mailTemplateValue = mailTemplateFields[field.id] || 'no';
-                      const isMailTemplateEnabled = isSelected && hasMailTemplate;
-                      const hasBilling = hasBillingTreatment(field.treatment);
-                      const billingValue = billingFields[field.id] || 'no';
-                      const isBillingEnabled = isSelected && hasBilling;
-                      
-                      return (
-                        <SortableRow
-                          key={field.id}
-                          field={field}
-                          isDefault={isDefault}
-                          isSelected={isSelected}
-                          useFieldValue={useFieldValue}
-                          hasMailTemplate={hasMailTemplate}
-                          mailTemplateValue={mailTemplateValue}
-                          isMailTemplateEnabled={isMailTemplateEnabled}
-                          hasBilling={hasBilling}
-                          billingValue={billingValue}
-                          isBillingEnabled={isBillingEnabled}
-                          handleFieldChange={handleFieldChange}
-                          handleMailTemplateChange={handleMailTemplateChange}
-                          handleBillingChange={handleBillingChange}
-                          USE_FIELD_OPTIONS={USE_FIELD_OPTIONS}
-                          MAIL_TEMPLATE_OPTIONS={MAIL_TEMPLATE_OPTIONS}
-                          BILLING_OPTIONS={BILLING_OPTIONS}
-                          mailSubject={mailSubjects[field.id] || ''}
-                          mailBody={mailBodies[field.id] || ''}
-                          onOpenMailModal={handleOpenMailModal}
-                        />
-                      );
-                    })}
-                  </tbody>
-                </SortableContext>
-              </table>
-            </DndContext>
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Field Name
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Use Field
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Mail Template
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Billing
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {sortedFields.map((field) => {
+                  const isDefault = field.default_value === true;
+                  const isSelected = selectedFields[field.id] || false;
+                  const useFieldValue = isSelected ? 'yes' : 'no';
+                  const hasMailTemplate = hasTextToMailTreatment(field.treatment);
+                  const mailTemplateValue = mailTemplateFields[field.id] || 'no';
+                  const isMailTemplateEnabled = isSelected && hasMailTemplate;
+                  const hasBilling = hasBillingTreatment(field.treatment);
+                  const billingValue = billingFields[field.id] || 'no';
+                  const isBillingEnabled = isSelected && hasBilling;
+                  
+                  return (
+                    <TableRow
+                      key={field.id}
+                      field={field}
+                      isDefault={isDefault}
+                      isSelected={isSelected}
+                      useFieldValue={useFieldValue}
+                      hasMailTemplate={hasMailTemplate}
+                      mailTemplateValue={mailTemplateValue}
+                      isMailTemplateEnabled={isMailTemplateEnabled}
+                      hasBilling={hasBilling}
+                      billingValue={billingValue}
+                      isBillingEnabled={isBillingEnabled}
+                      handleFieldChange={handleFieldChange}
+                      handleMailTemplateChange={handleMailTemplateChange}
+                      handleBillingChange={handleBillingChange}
+                      USE_FIELD_OPTIONS={USE_FIELD_OPTIONS}
+                      MAIL_TEMPLATE_OPTIONS={MAIL_TEMPLATE_OPTIONS}
+                      BILLING_OPTIONS={BILLING_OPTIONS}
+                      mailSubject={mailSubjects[field.id] || ''}
+                      mailBody={mailBodies[field.id] || ''}
+                      onOpenMailModal={handleOpenMailModal}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
+        )}
+      </div>
+    );
+  };
+
+  // Sortable Field Card Component for Arrange Form
+  const SortableFieldCard = ({ field, index }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: field.id });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+    };
+
+    const isAttachment = field.field_type === 'Attachment';
+
+    // Render field input based on field type
+    const renderFieldInput = () => {
+      if (isAttachment) {
+        return (
+          <div className="text-red-600 text-sm font-medium italic py-2">
+            This field is attachment
+          </div>
+        );
+      }
+
+      switch (field.field_type) {
+        case 'Text':
+          return (
+            <input
+              type="text"
+              disabled
+              placeholder={`Enter ${field.field_name}`}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 cursor-move"
+            />
+          );
+        case 'Number':
+          return (
+            <input
+              type="number"
+              disabled
+              placeholder={`Enter ${field.field_name}`}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 cursor-move"
+            />
+          );
+        case 'Date':
+          return (
+            <div className="relative">
+              <input
+                type="text"
+                disabled
+                placeholder="dd/mm/yyyy"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 cursor-move"
+              />
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            </div>
+          );
+        case 'Dropdown':
+          return (
+            <select
+              disabled
+              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 cursor-move"
+            >
+              <option>Select {field.field_name}</option>
+              {Array.isArray(field.dropdown_options) && field.dropdown_options.map((option, idx) => (
+                <option key={idx} value={option}>{option}</option>
+              ))}
+            </select>
+          );
+        default:
+          return (
+            <input
+              type="text"
+              disabled
+              placeholder={`Enter ${field.field_name}`}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500 cursor-move"
+            />
+          );
+      }
+    };
+
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className={`p-3 rounded-lg cursor-move transition-all ${isDragging ? 'bg-blue-100 shadow-lg scale-105' : 'bg-gray-100 hover:bg-blue-50'}`}
+      >
+        <label className="block text-sm font-medium text-gray-700 mb-2 cursor-move">
+          {field.field_name}
+        </label>
+        {renderFieldInput()}
+      </div>
+    );
+  };
+
+  // Handle drag end for Arrange Form
+  const handleArrangeFormDragEnd = (event) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      setArrangeFormOrder((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  // Reset arrange form order to initial state
+  const handleResetArrangeForm = () => {
+    setArrangeFormOrder([...initialArrangeFormOrder]);
+  };
+
+  // Cancel and go back
+  const handleCancelArrangeForm = () => {
+    setArrangeFormOrder([...initialArrangeFormOrder]);
+  };
+
+  // Update arrange form order
+  const handleUpdateArrangeForm = async () => {
+    if (!isEditMode || !jobRegisterId) {
+      showError('Cannot update: Job register ID is missing');
+      return;
+    }
+
+    try {
+      // Build form_fields_json array maintaining the new arrange form order
+      // First, get the arranged fields in order
+      const arrangedFieldsSet = new Set(arrangeFormOrder);
+      
+      // Build form_fields_json with arranged fields first, then non-arranged fields
+      const formFieldsJson = [];
+      
+      // Add arranged fields in their new order
+      arrangeFormOrder.forEach((fieldId) => {
+        const field = fieldsMaster.find(f => f.id === fieldId);
+        if (!field) return;
+
+        const isUseField = selectedFields[fieldId] || false;
+        const mailTemplateValue = mailTemplateFields[fieldId] || 'no';
+        const billingValue = billingFields[fieldId] || 'no';
+        const mailSubject = mailSubjects[fieldId] || '';
+        const mailBody = mailBodies[fieldId] || '';
+
+        formFieldsJson.push({
+          name: field.field_name || '',
+          use_field: isUseField,
+          mail_template: mailTemplateValue === 'yes',
+          billing: billingValue === 'yes',
+          mail_subject: mailSubject,
+          mail_body: mailBody,
+        });
+      });
+
+      // Add non-arranged fields (fields with use_field = false) at the end
+      orderedFields.forEach((fieldId) => {
+        if (!arrangedFieldsSet.has(fieldId)) {
+          const field = fieldsMaster.find(f => f.id === fieldId);
+          if (!field) return;
+
+          const isUseField = selectedFields[fieldId] || false;
+          const mailTemplateValue = mailTemplateFields[fieldId] || 'no';
+          const billingValue = billingFields[fieldId] || 'no';
+          const mailSubject = mailSubjects[fieldId] || '';
+          const mailBody = mailBodies[fieldId] || '';
+
+          formFieldsJson.push({
+            name: field.field_name || '',
+            use_field: isUseField,
+            mail_template: mailTemplateValue === 'yes',
+            billing: billingValue === 'yes',
+            mail_subject: mailSubject,
+            mail_body: mailBody,
+          });
+        }
+      });
+
+      // Update ordered fields to match new arrange form order
+      const newOrderedFields = [...arrangeFormOrder, ...orderedFields.filter(id => !arrangedFieldsSet.has(id))];
+      setOrderedFields(newOrderedFields);
+
+      // Call the API to update job register fields
+      await api.post(`/job-register-fields/job-register/${jobRegisterId}/update`, {
+        form_fields_json: formFieldsJson,
+      });
+
+      // Update initial state after successful save
+      setInitialArrangeFormOrder([...arrangeFormOrder]);
+
+      // Reload the saved job register fields to reflect the update
+      await fetchJobRegisterFields();
+
+      success('Form arrangement updated successfully');
+    } catch (err) {
+      console.error('Error updating form arrangement:', err);
+      showError(err.response?.data?.error || 'Failed to update form arrangement');
+    }
+  };
+
+  // Arrange Form Tab Content
+  const ArrangeFormTab = () => {
+    const sensors = useSensors(
+      useSensor(PointerSensor),
+      useSensor(KeyboardSensor, {
+        coordinateGetter: sortableKeyboardCoordinates,
+      })
+    );
+
+    // Get active fields (only those with use_field = true) in arrange form order
+    const activeFields = arrangeFormOrder
+      .map(fieldId => fieldsMaster.find(f => f.id === fieldId))
+      .filter(field => field != null);
+
+    if (fieldsMasterLoading) {
+      return (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-center py-12">
+            <div className="flex flex-col items-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+              <p className="mt-2 text-gray-600">Loading form...</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Arrange Form</h3>
+          <p className="text-sm text-gray-600 mt-1">Drag and drop fields to arrange the form layout. Only active fields are shown.</p>
+        </div>
+        
+        {activeFields.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            <p>No active fields available. Please enable fields in the Job Fields tab first.</p>
+          </div>
+        ) : (
+          <>
+            <div className="p-6">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleArrangeFormDragEnd}
+              >
+                <SortableContext
+                  items={arrangeFormOrder}
+                  strategy={rectSortingStrategy}
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {activeFields.map((field, index) => (
+                      <SortableFieldCard
+                        key={field.id}
+                        field={field}
+                        index={index}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleResetArrangeForm}
+              >
+                Reset
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleUpdateArrangeForm}
+              >
+                Update
+              </Button>
+            </div>
+          </>
         )}
       </div>
     );
@@ -1011,6 +1348,7 @@ export default function JobRegisterPage({ mode = 'add' }) {
   const tabs = [
     { label: 'Basic Information' },
     { label: 'Job Fields' },
+    { label: 'Arrange Form' },
   ];
 
   return (
@@ -1044,6 +1382,8 @@ export default function JobRegisterPage({ mode = 'add' }) {
           />
           {/* Job Fields Tab */}
           <JobFieldsTab />
+          {/* Arrange Form Tab */}
+          <ArrangeFormTab />
         </Tabs>
       ) : (
         /* Add Mode: Show Form Only */
