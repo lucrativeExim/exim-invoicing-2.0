@@ -207,7 +207,7 @@ Indexed for date range queries and sorting:
 Indexed for filtering:
 
 #### job table
-- `idx_invoice_ready` on `invoice_ready` - For filtering invoice-ready jobs
+- `idx_invoice_type` on `invoice_type` - For filtering jobs by invoice type
 
 ## Performance Benefits
 

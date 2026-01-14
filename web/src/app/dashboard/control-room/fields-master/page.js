@@ -8,6 +8,7 @@ import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
 import FieldsMasterForm from './FieldsMasterForm';
 import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 
 export default function FieldsMasterPage() {
   const router = useRouter();
@@ -247,11 +248,11 @@ export default function FieldsMasterPage() {
       )}
 
       {/* Page Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
+      <div className="mb-2 flex items-center justify-end">
+        {/* <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Fields Master</h1>
           <p className="text-sm text-gray-600">Manage form fields and their configurations</p>
-        </div>
+        </div> */}
         <Button
           onClick={() => {
             if (showAddForm) {
@@ -297,6 +298,9 @@ export default function FieldsMasterPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Field Name
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -314,48 +318,11 @@ export default function FieldsMasterPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Created At
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {fields.map((field) => (
                   <tr key={field.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {field.field_name || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {getFieldTypeLabel(field.field_type)}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {field.default_value === true || field.default_value === 'true' || field.default_value === 1 ? 'Yes' : 'No'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">
-                        {Array.isArray(field.treatment) && field.treatment.length > 0
-                          ? field.treatment.join(', ')
-                          : 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">
-                        {field.field_type === 'Dropdown' && Array.isArray(field.dropdown_options) && field.dropdown_options.length > 0
-                          ? field.dropdown_options.join(', ')
-                          : 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {field.created_at
-                        ? new Date(field.created_at).toLocaleDateString()
-                        : 'N/A'}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
                         <button
@@ -412,6 +379,38 @@ export default function FieldsMasterPage() {
                           </>
                         )}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {field.field_name || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {getFieldTypeLabel(field.field_type)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {field.default_value === true || field.default_value === 'true' || field.default_value === 1 ? 'Yes' : 'No'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {Array.isArray(field.treatment) && field.treatment.length > 0
+                          ? field.treatment.join(', ')
+                          : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {field.field_type === 'Dropdown' && Array.isArray(field.dropdown_options) && field.dropdown_options.length > 0
+                          ? field.dropdown_options.join(', ')
+                          : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDateDDMMYYYY(field.created_at)}
                     </td>
                   </tr>
                 ))}

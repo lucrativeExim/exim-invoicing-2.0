@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input, Button, SelectBox, DateInput } from '@/components/formComponents';
 import { useAccount } from '@/context/AccountContext';
 import accountService from '@/services/accountService';
 import api from '@/services/api';
+import ClientServiceChargeForm from '../components/ClientServiceChargeForm';
+import Modal from '@/components/Modal';
 
 // Helper function to generate a safe key from field name
 const getFieldKey = (fieldName) => {
@@ -81,7 +83,6 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const [formData, setFormData] = useState({});
   const [loading, setLoading] = useState(true);
   const [fieldsLoading, setFieldsLoading] = useState(false);
-  const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
   const [errors, setErrors] = useState({});
   const [clientServiceErrors, setClientServiceErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -95,11 +96,16 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const [clientId, setClientId] = useState('');
   const [claimNo, setClaimNo] = useState('');
   const [status, setStatus] = useState('');
-  const [invoiceReady, setInvoiceReady] = useState('');
+  const [invoiceType, setInvoiceType] = useState('');
+  const [billingType, setBillingType] = useState('');
   const [remark, setRemark] = useState('');
   const [clientsLoading, setClientsLoading] = useState(false);
   const [busLoading, setBusLoading] = useState(false);
-  const [isFlipped, setIsFlipped] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const hasLoadedFromJobRef = useRef(false); // Track if we've loaded clientServiceCharge from job data in edit mode
+  const hasLoadedBasicFieldsRef = useRef(false); // Track if we've loaded basic job fields (jobNo, status, billingType, etc.) in edit mode
+  const lastLoadedJobIdRef = useRef(null); // Track which job ID we've loaded to prevent reloading same job
+  const expectedBillingTypeRef = useRef(null); // Track the expected billingType value from job data in edit mode
   // Store client and BU IDs from edit mode to populate dropdowns
   const [editClientId, setEditClientId] = useState(null);
   const [editBuId, setEditBuId] = useState(null);
@@ -226,23 +232,65 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   useEffect(() => {
     if (isEditMode && initialJobData) {
       const job = initialJobData;
+      const jobId = job.id;
       
-      // Set job register - this will trigger fetchJobRegisterFields via the selectedJobRegister effect
-      if (job.jobRegister) {
-        setSelectedJobRegister(job.jobRegister);
-        setJobRegisterFieldId(job.job_register_field_id);
-        // Trigger field loading - preserve form data in edit mode
-        fetchJobRegisterFields(job.job_register_id, true);
+      // Only load if this is a different job or we haven't loaded yet
+      if (lastLoadedJobIdRef.current !== jobId) {
+        // Set job register - this will trigger fetchJobRegisterFields via the selectedJobRegister effect
+        if (job.jobRegister) {
+          setSelectedJobRegister(job.jobRegister);
+          setJobRegisterFieldId(job.job_register_field_id);
+          
+          // If job has jobRegisterField with form_fields_json, use it directly
+          // This ensures we use the specific field version the job was created with
+          if (job.jobRegisterField && job.jobRegisterField.form_fields_json) {
+            try {
+              setFieldsLoading(true);
+              let fields = job.jobRegisterField.form_fields_json;
+              if (typeof fields === 'string') {
+                fields = JSON.parse(fields);
+              }
+              
+              // Filter only fields where use_field is true
+              const activeFields = Array.isArray(fields) 
+                ? fields.filter(field => field.use_field === true)
+                : [];
+              
+              setJobRegisterFields(activeFields);
+              
+              // Fetch fields master data for all fields at once (bulk fetch)
+              const fieldNames = activeFields.map(field => field.name);
+              fetchFieldsMaster(fieldNames).then(masterMap => {
+                setFieldsMasterMap(masterMap);
+                setFieldsLoading(false);
+              });
+            } catch (error) {
+              console.error('Error parsing job register field:', error);
+              // Fallback to fetching active fields
+              fetchJobRegisterFields(job.job_register_id, true);
+            }
+          } else {
+            // Fallback: Trigger field loading - preserve form data in edit mode
+            fetchJobRegisterFields(job.job_register_id, true);
+          }
+        }
+        
+        // Set basic fields - only set when loading a new/different job
+        setJobNo(job.job_no || '');
+        setClaimNo(job.claim_no || '');
+        setStatus(job.status || '');
+        setInvoiceType(job.invoice_type || '');
+        // Ensure billing_type is set correctly - handle null/undefined explicitly
+        const expectedBillingType = (job.billing_type !== null && job.billing_type !== undefined) ? job.billing_type : '';
+        setBillingType(expectedBillingType);
+        expectedBillingTypeRef.current = expectedBillingType; // Store expected value for restoration
+        setRemark(job.remark || '');
+        
+        lastLoadedJobIdRef.current = jobId; // Track which job we've loaded
+        hasLoadedBasicFieldsRef.current = true; // Mark that we've loaded basic fields
       }
       
-      // Set basic fields
-      setJobNo(job.job_no || '');
-      setClaimNo(job.claim_no || '');
-      setStatus(job.status || '');
-      setInvoiceReady(job.invoice_ready || '');
-      setRemark(job.remark || '');
-      
-      // Load client_info_id and client_bu_id directly from job
+      // Load client_info_id and client_bu_id directly from job (always load these)
       if (job.client_info_id) {
         setEditClientId(job.client_info_id.toString());
       }
@@ -253,13 +301,24 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         setEditAccountId(job.clientInfo.account_id);
       }
       
-      // Load service charge data
+      // Load service charge data (always load this)
       if (job.jobServiceCharges && job.jobServiceCharges.length > 0) {
         const charge = job.jobServiceCharges[0];
         setClientId(charge.group_id || '');
         setBuAddress(charge.client_address || '');
         setGstNo(charge.gst_no || '');
         setScI(charge.gst_type || '');
+        
+        // Set clientServiceCharge from job.jobServiceCharges for edit mode
+        // Create a charge object that matches the expected structure
+        setClientServiceCharge({
+          ...charge,
+          group_id: charge.group_id || '',
+          account: charge.account || job.clientInfo?.account || null,
+          clientInfo: job.clientInfo || null,
+          clientBu: job.clientBu || null,
+        });
+        hasLoadedFromJobRef.current = true; // Mark that we've loaded from job data
         
         setClientServiceChargeFormData({
           account_name: charge.account?.account_name || job.clientInfo?.account?.account_name || '',
@@ -319,7 +378,25 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         }
       }
     }
-  }, [isEditMode, initialJobData, fetchJobRegisterFields, accounts, selectAccount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditMode, initialJobData]);
+  
+  // Separate effect to ensure billingType stays synchronized with initialJobData in edit mode
+  // This updates billingType whenever initialJobData.billing_type changes (e.g., after job update)
+  useEffect(() => {
+    if (isEditMode && initialJobData) {
+      const jobBillingType = (initialJobData.billing_type !== null && initialJobData.billing_type !== undefined) 
+        ? initialJobData.billing_type 
+        : '';
+      
+      // Update billingType if it differs from the job data
+      if (billingType !== jobBillingType) {
+        setBillingType(jobBillingType);
+        expectedBillingTypeRef.current = jobBillingType; // Update expected value
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditMode, initialJobData?.billing_type]);
 
   // Load form data after job register fields are loaded in edit mode
   useEffect(() => {
@@ -479,7 +556,10 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         setSelectedClientId('');
         setClientBus([]);
         setSelectedBuId('');
-        setClientId('');
+        // In edit mode, if we already loaded clientId from job data, don't clear it
+        if (!isEditMode || !hasLoadedFromJobRef.current) {
+          setClientId('');
+        }
         return;
       }
 
@@ -564,11 +644,30 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           clientsData = clientsData.filter(client => client.status === 'Active');
         }
 
-        // Clear selected client if it's no longer in the filtered list
-        if (selectedClientId && !clientsData.find(client => client.id.toString() === selectedClientId.toString())) {
+        // In edit mode, ensure the client from editClientId is always included
+        if (isEditMode && editClientId) {
+          const editClientExists = clientsData.find(client => client.id.toString() === editClientId.toString());
+          if (!editClientExists) {
+            // Fetch the client directly by ID to include it (even if inactive, since we're editing)
+            try {
+              const editClientResponse = await api.get(`/client-info/${editClientId}`);
+              if (editClientResponse.data) {
+                clientsData.push(editClientResponse.data);
+              }
+            } catch (error) {
+              console.error('Error fetching edit client:', error);
+            }
+          }
+        }
+
+        // Clear selected client if it's no longer in the filtered list (but not in edit mode)
+        if (!isEditMode && selectedClientId && !clientsData.find(client => client.id.toString() === selectedClientId.toString())) {
           setSelectedClientId('');
           setSelectedBuId('');
-          setClientId('');
+          // In edit mode, if we already loaded clientId from job data, don't clear it
+          if (!hasLoadedFromJobRef.current) {
+            setClientId('');
+          }
         }
 
         setClients(clientsData);
@@ -581,7 +680,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     };
 
     fetchClients();
-  }, [selectedAccount, selectedJobRegister, accounts]);
+  }, [selectedAccount, selectedJobRegister, accounts, isEditMode, editClientId]);
 
   // Set account from edit mode once accounts are loaded
   useEffect(() => {
@@ -595,9 +694,9 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
 
   // Set client ID from edit mode once clients are loaded
   useEffect(() => {
-    if (isEditMode && editClientId && clients.length > 0 && !clientsLoading && !selectedClientId) {
+    if (isEditMode && editClientId && clients.length > 0 && !clientsLoading) {
       const clientExists = clients.find(client => client.id.toString() === editClientId.toString());
-      if (clientExists) {
+      if (clientExists && selectedClientId !== editClientId) {
         setSelectedClientId(editClientId);
       }
     }
@@ -605,9 +704,9 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
 
   // Set BU ID from edit mode once BUs are loaded
   useEffect(() => {
-    if (isEditMode && editBuId && selectedClientId && clientBus.length > 0 && !busLoading && !selectedBuId) {
+    if (isEditMode && editBuId && selectedClientId && clientBus.length > 0 && !busLoading) {
       const buExists = clientBus.find(bu => bu.id.toString() === editBuId.toString());
-      if (buExists) {
+      if (buExists && selectedBuId !== editBuId) {
         setSelectedBuId(editBuId);
       }
     }
@@ -619,7 +718,10 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       if (!selectedClientId) {
         setClientBus([]);
         setSelectedBuId('');
-        setClientId('');
+        // In edit mode, if we already loaded clientId from job data, don't clear it
+        if (!isEditMode || !hasLoadedFromJobRef.current) {
+          setClientId('');
+        }
         return;
       }
 
@@ -654,10 +756,29 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           }
         }
         
-        // Clear selected BU/Div if it's no longer in the filtered list
-        if (selectedBuId && !busWithGroupId.find(bu => bu.id.toString() === selectedBuId.toString())) {
+        // In edit mode, ensure the BU from editBuId is always included
+        if (isEditMode && editBuId && selectedClientId) {
+          const editBuExists = busWithGroupId.find(bu => bu.id.toString() === editBuId.toString());
+          if (!editBuExists) {
+            // Fetch the BU directly by ID to include it (even if inactive, since we're editing)
+            try {
+              const editBuResponse = await api.get(`/client-bu/${editBuId}`);
+              if (editBuResponse.data) {
+                busWithGroupId.push(editBuResponse.data);
+              }
+            } catch (error) {
+              console.error('Error fetching edit BU:', error);
+            }
+          }
+        }
+        
+        // Clear selected BU/Div if it's no longer in the filtered list (but not in edit mode)
+        if (!isEditMode && selectedBuId && !busWithGroupId.find(bu => bu.id.toString() === selectedBuId.toString())) {
           setSelectedBuId('');
-          setClientId('');
+          // In edit mode, if we already loaded clientId from job data, don't clear it
+          if (!hasLoadedFromJobRef.current) {
+            setClientId('');
+          }
         }
         
         setClientBus(busWithGroupId);
@@ -670,14 +791,25 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     };
 
     fetchBus();
-  }, [selectedClientId, selectedJobRegister]);
+  }, [selectedClientId, selectedJobRegister, isEditMode, editBuId]);
 
   // Fetch group_id (Client Id) based on BU/Div selection and selected job register
   useEffect(() => {
     const fetchGroupId = async () => {
       if (!selectedBuId) {
-        setClientId('');
-        setClientServiceCharge(null);
+        // In edit mode, if we already loaded clientId from job data, don't clear it
+        if (!isEditMode || !hasLoadedFromJobRef.current) {
+          setClientId('');
+        }
+        // Don't clear clientServiceCharge in edit mode if it was set from job data
+        if (!isEditMode) {
+          setClientServiceCharge(null);
+        }
+        return;
+      }
+
+      // In edit mode, if we already loaded clientServiceCharge from job data, skip fetching
+      if (isEditMode && hasLoadedFromJobRef.current) {
         return;
       }
 
@@ -707,40 +839,49 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
             if (chargeData.length > 0) {
               const charge = chargeData[0];
               setClientServiceCharge(charge);
-              // Populate form data for editing
-              setClientServiceChargeFormData({
-                account_name: charge.account?.account_name || '',
-                client_name: charge.clientInfo?.client_name || '',
-                bu_div: charge.clientBu?.bu_name || '',
-                concern_person: charge.concern_person || '',
-                concern_email_id: charge.concern_email_id || '',
-                concern_phone_no: charge.concern_phone_no || '',
-                min: charge.min || '',
-                max: charge.max || '',
-                in_percentage: charge.in_percentage || '',
-                fixed: charge.fixed || '',
-                per_shb: charge.per_shb || '',
-                ca_charges: charge.ca_charges || '',
-                ce_charges: charge.ce_charges || '',
-                registration_other_charges: charge.registration_other_charges || '',
-                invoice_description: charge.invoice_description || '',
-                percentage_per_shb: charge.percentage_per_shb || 'No',
-                fixed_percentage_per_shb: charge.fixed_percentage_per_shb || 'No',
-              });
+              // Populate form data for editing (only if not in edit mode, as edit mode data comes from job)
+              if (!isEditMode) {
+                setClientServiceChargeFormData({
+                  account_name: charge.account?.account_name || '',
+                  client_name: charge.clientInfo?.client_name || '',
+                  bu_div: charge.clientBu?.bu_name || '',
+                  concern_person: charge.concern_person || '',
+                  concern_email_id: charge.concern_email_id || '',
+                  concern_phone_no: charge.concern_phone_no || '',
+                  min: charge.min || '',
+                  max: charge.max || '',
+                  in_percentage: charge.in_percentage || '',
+                  fixed: charge.fixed || '',
+                  per_shb: charge.per_shb || '',
+                  ca_charges: charge.ca_charges || '',
+                  ce_charges: charge.ce_charges || '',
+                  registration_other_charges: charge.registration_other_charges || '',
+                  invoice_description: charge.invoice_description || '',
+                  percentage_per_shb: charge.percentage_per_shb || 'No',
+                  fixed_percentage_per_shb: charge.fixed_percentage_per_shb || 'No',
+                });
+              }
             }
           }
         } else {
           setClientId('');
-          setClientServiceCharge(null);
+          // Don't clear clientServiceCharge in edit mode if it was set from job data
+          if (!isEditMode) {
+            setClientServiceCharge(null);
+          }
         }
       } catch (error) {
         console.error('Error fetching group_id:', error);
         setClientId('');
-        setClientServiceCharge(null);
+        // Don't clear clientServiceCharge in edit mode if it was set from job data
+        if (!isEditMode) {
+          setClientServiceCharge(null);
+        }
       }
     };
 
     fetchGroupId();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBuId, selectedJobRegister]);
 
   // Fetch BU/Div details (Address, GST No, S-C or I) based on BU/Div selection
@@ -863,18 +1004,8 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     }
   };
 
-  // Handle account selection
-  const handleAccountSelect = (account) => {
-    selectAccount(account);
-    setIsAccountDropdownOpen(false);
-  };
 
-  const handleSelectAllAccounts = () => {
-    selectAccount({ id: 'all', account_name: 'All Accounts', allAccounts: accounts });
-    setIsAccountDropdownOpen(false);
-  };
-
-  // Handle reset
+  // Handle reset - clears everything including job register
   const handleReset = () => {
     setSelectedJobRegister(null);
     setJobRegisterFields([]);
@@ -887,9 +1018,10 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     setSelectedBuId('');
     setClientId('');
     setStatus('');
-    setInvoiceReady('');
+    setInvoiceType('');
+    setBillingType('');
     setRemark('');
-    setIsFlipped(false);
+    setIsModalOpen(false);
     setClientServiceCharge(null);
     setBuAddress('');
     setGstNo('');
@@ -927,6 +1059,89 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     });
     setJobNo('');
     setClaimNo('');
+  };
+
+  // Reset form for new job - preserves job register selection
+  const resetFormForNewJob = async () => {
+    // Clear form data but keep job register selected
+    setFormData({});
+    setErrors({});
+    setClientServiceErrors({});
+    setSelectedClientId('');
+    setSelectedBuId('');
+    setClientId('');
+    setStatus('');
+    setInvoiceType('');
+    setBillingType('');
+    setRemark('');
+    setIsModalOpen(false);
+    setClientServiceCharge(null);
+    setBuAddress('');
+    setGstNo('');
+    setScI('');
+    setClientServiceChargeFormData({
+      account_name: '',
+      client_name: '',
+      bu_div: '',
+      concern_person: '',
+      concern_email_id: '',
+      concern_phone_no: '',
+      min: '',
+      max: '',
+      in_percentage: '',
+      fixed: '',
+      per_shb: '',
+      ca_charges: '',
+      ce_charges: '',
+      registration_other_charges: '',
+      invoice_description: '',
+      percentage_per_shb: 'No',
+      fixed_percentage_per_shb: 'No',
+    });
+    
+    // Reset remi charges but keep descriptions from job register
+    if (selectedJobRegister) {
+      setRemiData({
+        remi_one_desc: selectedJobRegister.remi_one_desc || '',
+        remi_one_charges: '',
+        remi_two_desc: selectedJobRegister.remi_two_desc || '',
+        remi_two_charges: '',
+        remi_three_desc: selectedJobRegister.remi_three_desc || '',
+        remi_three_charges: '',
+        remi_four_desc: selectedJobRegister.remi_four_desc || '',
+        remi_four_charges: '',
+        remi_five_desc: selectedJobRegister.remi_five_desc || '',
+        remi_five_charges: '',
+      });
+    } else {
+      setRemiData({
+        remi_one_desc: '',
+        remi_one_charges: '',
+        remi_two_desc: '',
+        remi_two_charges: '',
+        remi_three_desc: '',
+        remi_three_charges: '',
+        remi_four_desc: '',
+        remi_four_charges: '',
+        remi_five_desc: '',
+        remi_five_charges: '',
+      });
+    }
+    
+    // Initialize form data with empty values for job register fields
+    if (jobRegisterFields.length > 0) {
+      const initialFormData = {};
+      jobRegisterFields.forEach(field => {
+        const fieldKey = getFieldKey(field.name);
+        initialFormData[fieldKey] = '';
+      });
+      setFormData(initialFormData);
+    }
+    
+    // Generate new job number for the same job register
+    if (selectedJobRegister) {
+      await fetchNextJobNo(selectedJobRegister);
+    }
   };
 
   // Helper function to map form field data to Job model columns
@@ -1004,9 +1219,6 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       newErrors.job_register = 'Please select a Job Code';
     }
     
-    if (!selectedAccount) {
-      newErrors.account = 'Please select an Account';
-    }
     
     if (!selectedClientId) {
       newErrors.client_name = 'Please select a Client Name';
@@ -1020,8 +1232,12 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       newErrors.status = 'Please select a Status';
     }
     
-    if (!invoiceReady) {
-      newErrors.invoice_ready = 'Please select Send To Performa Invoice';
+    if (!invoiceType) {
+      newErrors.invoice_type = 'Please select Invoice Type';
+    }
+    
+    if (!billingType) {
+      newErrors.billing_type = 'Please select Billing Type';
     }
     
   // Remark is optional, no validation needed
@@ -1082,7 +1298,8 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         client_bu_id: selectedBuId ? parseInt(selectedBuId) : null,
         claim_no: claimNo,
         status: status,
-        invoice_ready: invoiceReady === 'true' ? 'true' : 'false',
+        invoice_type: invoiceType || null,
+        billing_type: billingType || null,
         remark: remark || null,
         // Include mapped form fields as individual properties instead of form_field_json_data
         ...mappedFormFields,
@@ -1153,7 +1370,24 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           ? `Job No ${successJobNo} ${isEditMode ? 'updated' : 'saved'} successfully!`
           : `Job ${isEditMode ? 'updated' : 'saved'} successfully!`;
         alert(successMessage);
-        router.push('/dashboard/job/job');
+        
+        // In edit mode, redirect based on job status
+        if (isEditMode) {
+          const jobStatus = status || response.data.status;
+          const jobRegisterId = selectedJobRegister?.id || response.data.job_register_id;
+          
+          // Redirect to in-process page with job code (for all statuses including Closed)
+          if (jobStatus === 'In_process' || jobStatus === 'In-process') {
+            router.push(`/dashboard/job/job?jobCodeId=${jobRegisterId}`);
+          }
+          // Default: redirect to inprocess page
+          else {
+            router.push(`/dashboard/job/job${jobRegisterId ? `?jobCodeId=${jobRegisterId}` : ''}`);
+          }
+        } else {
+          // In add mode, reset form for new job (preserves job register selection)
+          await resetFormForNewJob();
+        }
       }
     } catch (error) {
       console.error('Error saving job:', error);
@@ -1164,12 +1398,6 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     }
   };
 
-  // Get selected account display text
-  const getSelectedAccountText = () => {
-    if (!selectedAccount) return 'Select Account';
-    if (selectedAccount.id === 'all') return 'All Accounts';
-    return selectedAccount.account_name;
-  };
 
   // Convert job registers to options format
   const jobRegisterOptions = jobRegisters.map(jr => ({
@@ -1295,129 +1523,31 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       {/* Page Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">{isEditMode ? 'Edit Job' : 'Add Job'}</h1>
-          {!isFlipped && (
-            <>
-              <Button
-                variant="primary"
-                onClick={() => router.back()}
-                className="text-sm px-3 py-1.5 bg-amber-200 hover:bg-amber-300 text-gray-800 border border-amber-300"
-              >
-                Back
-              </Button>
-              
-              {/* Job Code Dropdown */}
-              <div className="min-w-[250px]">
-                <SelectBox
-                  name="job_register"
-                  value={selectedJobRegister?.id || ''}
-                  onChange={handleJobRegisterChange}
-                  options={jobRegisterOptions}
-                  error={errors.job_register}
-                  placeholder="Select Job Code"
-                  isClearable={!isEditMode}
-                  isSearchable={true}
-                  isDisabled={isEditMode}
-                  className="mb-0"
-                />
-                {errors.job_register && (
-                  <p className="mt-0.5 text-xs text-red-600">{errors.job_register}</p>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Account Selection Dropdown */}
-        {!isFlipped && (
-          <div className="relative">
-            <button
-              onClick={() => setIsAccountDropdownOpen(!isAccountDropdownOpen)}
-              className="flex items-center justify-between min-w-[200px] px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-all"
-            >
-              <span className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                <span className="truncate">{getSelectedAccountText()}</span>
-              </span>
-              <svg
-                className={`w-5 h-5 ml-2 transition-transform ${isAccountDropdownOpen ? 'rotate-180' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {/* Dropdown Menu */}
-            {isAccountDropdownOpen && (
-              <>
-                {/* Backdrop */}
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setIsAccountDropdownOpen(false)}
-                />
-                
-                {/* Dropdown content */}
-                <div className="absolute right-0 z-20 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 max-h-60 overflow-y-auto">
-                  {/* All Accounts Option */}
-                  <button
-                    onClick={handleSelectAllAccounts}
-                    className={`w-full px-4 py-2.5 text-left text-sm hover:bg-primary-50 transition-colors flex items-center justify-between ${
-                      selectedAccount?.id === 'all' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700'
-                    }`}
-                  >
-                    <span>All Accounts</span>
-                    {selectedAccount?.id === 'all' && (
-                      <svg className="w-4 h-4 text-primary-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    )}
-                  </button>
-                  
-                  {/* Divider */}
-                  <div className="border-t border-gray-100" />
-                  
-                  {/* Individual Accounts */}
-                  {accounts.length > 0 ? (
-                    accounts.map((account) => (
-                      <button
-                        key={account.id}
-                        onClick={() => handleAccountSelect(account)}
-                        className={`w-full px-4 py-2.5 text-left text-sm hover:bg-primary-50 transition-colors flex items-center justify-between ${
-                          selectedAccount?.id === account.id ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-700'
-                        }`}
-                      >
-                        <span className="truncate">{account.account_name}</span>
-                        {selectedAccount?.id === account.id && (
-                          <svg className="w-4 h-4 text-primary-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-4 py-3 text-sm text-gray-500 text-center">
-                      No accounts available
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-            {errors.account && (
-              <p className="mt-0.5 text-xs text-red-600">{errors.account}</p>
+          {/* Job Code Dropdown */}
+          <div className="min-w-[250px]">
+            <SelectBox
+              name="job_register"
+              value={selectedJobRegister?.id || ''}
+              onChange={handleJobRegisterChange}
+              options={jobRegisterOptions}
+              error={errors.job_register}
+              placeholder="Select Job Code"
+              isClearable={!isEditMode}
+              isSearchable={true}
+              isDisabled={isEditMode}
+              className="mb-0"
+            />
+            {errors.job_register && (
+              <p className="mt-0.5 text-xs text-red-600">{errors.job_register}</p>
             )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Form Card - Only show if job register is selected */}
       {selectedJobRegister ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          {!isFlipped ? (
-            <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit}>
             {/* Combined Grid: Hardcoded Fields + Dynamic Fields + Additional Fields */}
             {fieldsLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -1427,7 +1557,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 mb-3">
                 {/* Hardcoded Fields - First Row */}
                 {/* Job No - Disabled (Read-only) */}
                 <div>
@@ -1442,45 +1572,72 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                   />
                 </div>
 
-                {/* Client Name - Dropdown (Required) */}
+                {/* Client Name - Dropdown (Required) or Text Input (Edit Mode) */}
                 <div>
-                  <SelectBox
-                    label="Client Name"
-                    name="client_name"
-                    value={selectedClientId}
-                    onChange={handleClientChange}
-                    options={clients.map(client => ({
-                      value: client.id,
-                      label: client.client_name
-                    }))}
-                    error={errors.client_name}
-                    placeholder="Select"
-                    isClearable={true}
-                    isSearchable={true}
-                    isLoading={clientsLoading}
-                    required
-                  />
+                  {isEditMode ? (
+                    <Input
+                      label="Client Name"
+                      type="text"
+                      name="client_name"
+                      value={initialJobData?.clientInfo?.client_name || ''}
+                      disabled={true}
+                      placeholder="Client Name"
+                      error={errors.client_name}
+                      required
+                    />
+                  ) : (
+                    <SelectBox
+                      label="Client Name"
+                      name="client_name"
+                      value={selectedClientId}
+                      onChange={handleClientChange}
+                      options={clients.map(client => ({
+                        value: client.id,
+                        label: client.client_name
+                      }))}
+                      error={errors.client_name}
+                      placeholder="Select"
+                      isClearable={!isEditMode}
+                      isSearchable={true}
+                      isLoading={clientsLoading}
+                      isDisabled={isEditMode}
+                      required
+                    />
+                  )}
                 </div>
 
-                {/* BU/Div - Dropdown (Required, always visible but disabled if no client selected) */}
+                {/* BU/Div - Dropdown (Required) or Text Input (Edit Mode) */}
                 <div>
-                  <SelectBox
-                    label="BU/Div"
-                    name="bu_div"
-                    value={selectedBuId}
-                    onChange={handleBuChange}
-                    options={clientBus.map(bu => ({
-                      value: bu.id,
-                      label: bu.bu_name
-                    }))}
-                    error={errors.bu_div}
-                    placeholder="Select"
-                    isClearable={true}
-                    isSearchable={true}
-                    isLoading={busLoading}
-                    isDisabled={!selectedClientId}
-                    required
-                  />
+                  {isEditMode ? (
+                    <Input
+                      label="BU/Div"
+                      type="text"
+                      name="bu_div"
+                      value={initialJobData?.clientBu?.bu_name || ''}
+                      disabled={true}
+                      placeholder="BU/Div"
+                      error={errors.bu_div}
+                      required
+                    />
+                  ) : (
+                    <SelectBox
+                      label="BU/Div"
+                      name="bu_div"
+                      value={selectedBuId}
+                      onChange={handleBuChange}
+                      options={clientBus.map(bu => ({
+                        value: bu.id,
+                        label: bu.bu_name
+                      }))}
+                      error={errors.bu_div}
+                      placeholder="Select"
+                      isClearable={!isEditMode}
+                      isSearchable={true}
+                      isLoading={busLoading}
+                      isDisabled={isEditMode || !selectedClientId}
+                      required
+                    />
+                  )}
                 </div>
 
                 {/* Hardcoded Fields - Second Row */}
@@ -1495,22 +1652,22 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                     placeholder="Client Id"
                     required
                   />
-                  {/* Flip Icon - Show only when Client Id is available */}
+                  {/* View Client Service Charges Button - Show only when Client Id is available */}
                   {clientId && (
                     <button
                       type="button"
-                      onClick={() => setIsFlipped(!isFlipped)}
+                      onClick={() => setIsModalOpen(true)}
                       className="absolute top-7 right-2 p-1 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-all z-10"
-                      title={isFlipped ? "Flip back to Job Form" : "Flip to view Client Service Charges"}
+                      title="View Client Service Charges"
                     >
                       <svg 
                         className="w-4 h-4" 
                         fill="none" 
                         stroke="currentColor" 
                         viewBox="0 0 24 24"
-                        style={{ transform: isFlipped ? 'scaleX(-1)' : 'none' }}
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
                     </button>
                   )}
@@ -1691,18 +1848,39 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                   />
                 </div>
 
-                {/* Invoice Ready - Dropdown (Required) */}
+                {/* Invoice Type - Dropdown (Required) */}
                 <div>
                   <SelectBox
-                    label="Invoice Ready"
-                    name="invoice_ready"
-                    value={invoiceReady}
-                    onChange={(e) => setInvoiceReady(e.target.value)}
+                    label="Invoice Type"
+                    name="invoice_type"
+                    value={invoiceType}
+                    onChange={(e) => setInvoiceType(e.target.value)}
                     options={[
-                      { value: 'true', label: 'Yes' },
-                      { value: 'false', label: 'No' }
+                      { value: 'full_invoice', label: 'Full Invoice' },
+                      { value: 'partial_invoice', label: 'Partial Invoice' }
                     ]}
-                    error={errors.invoice_ready}
+                    error={errors.invoice_type}
+                    placeholder="Select"
+                    isClearable={true}
+                    isSearchable={false}
+                    required
+                  />
+                </div>
+
+                {/* Billing Type - Dropdown (Required) */}
+                <div>
+                  <SelectBox
+                    label="Billing Type"
+                    name="billing_type"
+                    value={billingType}
+                    onChange={(e) => setBillingType(e.target.value)}
+                    options={[
+                      { value: 'Reimbursement', label: 'Reimbursement' },
+                      { value: 'Service_Reimbursement', label: 'Service & Reimbursement' },
+                      { value: 'Service', label: 'Service' },
+                      { value: 'Service_Reimbursement_Split', label: 'Service & Reimbursement Split' }
+                    ]}
+                    error={errors.billing_type}
                     placeholder="Select"
                     isClearable={true}
                     isSearchable={false}
@@ -1733,467 +1911,24 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
 
             {/* Action Buttons */}
             <div className="flex justify-end gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleReset}
-                className="bg-gray-500 hover:bg-gray-600 text-white"
-              >
-                Reset
-              </Button>
+              {!isEditMode && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleReset}
+                >
+                  Reset
+                </Button>
+              )}
               <Button
                 type="submit"
                 variant="primary"
-                className="bg-amber-200 hover:bg-amber-300 text-gray-800 border border-amber-300"
                 disabled={submitting}
               >
                 {submitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Job' : 'Save Job')}
               </Button>
             </div>
           </form>
-          ) : (
-            /* Client Service Charges Form - Shown when flipped */
-            <div>
-              <div className="mb-3">
-                <h2 className="text-lg font-semibold text-gray-900">Client Service Charges</h2>
-              </div>
-              
-              {clientServiceCharge ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {/* C-Id - Disabled */}
-                  <div className="relative">
-                    <Input
-                      label="C-Id"
-                      type="text"
-                      name="c_id"
-                      value={clientServiceCharge.group_id || ''}
-                      disabled
-                      placeholder="C-Id"
-                    />
-                    {/* Flip Icon - Show in C-Id field */}
-                    {clientServiceCharge.group_id && (
-                      <button
-                        type="button"
-                        onClick={() => setIsFlipped(false)}
-                        className="absolute top-7 right-2 p-1 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-all z-10"
-                        title="Flip back to Job Form"
-                      >
-                        <svg 
-                          className="w-4 h-4" 
-                          fill="none" 
-                          stroke="currentColor" 
-                          viewBox="0 0 24 24"
-                          style={{ transform: 'scaleX(-1)' }}
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Account Name - Enabled */}
-                  <div>
-                    <Input
-                      label="Account Name"
-                      type="text"
-                      name="account_name"
-                      value={clientServiceChargeFormData.account_name}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, account_name: e.target.value }))}
-                      placeholder="Account Name"
-                    />
-                  </div>
-
-                  {/* Client Name - Enabled */}
-                  <div>
-                    <Input
-                      label="Client Name"
-                      type="text"
-                      name="client_name"
-                      value={clientServiceChargeFormData.client_name}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, client_name: e.target.value }))}
-                      placeholder="Client Name"
-                    />
-                  </div>
-
-                  {/* BU/DIV - Enabled */}
-                  <div>
-                    <Input
-                      label="BU/DIV"
-                      type="text"
-                      name="bu_div"
-                      value={clientServiceChargeFormData.bu_div}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, bu_div: e.target.value }))}
-                      placeholder="BU/DIV"
-                    />
-                  </div>
-
-                  {/* BU/Div Address - Enabled (Editable) */}
-                  <div>
-                    <Input
-                      label="BU/Div Address"
-                      type="text"
-                      name="bu_address"
-                      value={buAddress}
-                      onChange={(e) => setBuAddress(e.target.value)}
-                      placeholder="BU/Div Address"
-                    />
-                  </div>
-
-                  {/* GST No - Enabled (Editable) */}
-                  <div>
-                    <Input
-                      label="GST No"
-                      type="text"
-                      name="gst_no"
-                      value={gstNo}
-                      onChange={(e) => {
-                        const value = e.target.value.toUpperCase();
-                        setGstNo(value);
-
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, gst_no: '' }));
-                        } else if (!GST_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            gst_no: 'Please enter a valid 15-character GST No.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, gst_no: '' }));
-                        }
-                      }}
-                      placeholder="GST No"
-                      error={clientServiceErrors.gst_no}
-                    />
-                  </div>
-
-                  {/* S-C or I - Dropdown (Enabled, Editable) */}
-                  <div>
-                    <SelectBox
-                      label="S-C or I"
-                      name="sc_i"
-                      value={scI}
-                      onChange={(e) => setScI(e.target.value)}
-                      options={[
-                        { value: 'SC', label: 'SC' },
-                        { value: 'I', label: 'I' },
-                        { value: 'EXEMPTED', label: 'EXEMPTED' }
-                      ]}
-                      placeholder="Select S-C or I"
-                      isClearable={true}
-                    />
-                  </div>
-
-                  {/* Concern Person - Enabled */}
-                  <div>
-                    <Input
-                      label="Concern Person"
-                      type="text"
-                      name="concern_person"
-                      value={clientServiceChargeFormData.concern_person}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, concern_person: e.target.value }))}
-                      placeholder="Concern Person"
-                    />
-                  </div>
-
-                  {/* Email ID - Enabled */}
-                  <div>
-                    <Input
-                      label="Email ID"
-                      type="email"
-                      name="concern_email_id"
-                      value={clientServiceChargeFormData.concern_email_id}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, concern_email_id: e.target.value }))}
-                      placeholder="Email ID"
-                    />
-                  </div>
-
-                  {/* Phone No - Enabled */}
-                  <div>
-                    <Input
-                      label="Phone No"
-                      type="text"
-                      name="concern_phone_no"
-                      value={clientServiceChargeFormData.concern_phone_no}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, concern_phone_no: value }));
-                        const digitsOnly = value.replace(/\D/g, '');
-                        if (!digitsOnly) {
-                          setClientServiceErrors((prev) => ({ ...prev, concern_phone_no: '' }));
-                        } else if (!INDIAN_MOBILE_REGEX.test(digitsOnly)) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            concern_phone_no: 'Please enter a valid 10-digit Indian mobile number.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, concern_phone_no: '' }));
-                        }
-                      }}
-                      placeholder="Phone No"
-                      error={clientServiceErrors.concern_phone_no}
-                    />
-                  </div>
-
-                  {/* Min - Enabled */}
-                  <div>
-                    <Input
-                      label="Min"
-                      type="number"
-                      name="min"
-                      value={clientServiceChargeFormData.min}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, min: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, min: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            min: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, min: '' }));
-                        }
-                      }}
-                      placeholder="Min"
-                      error={clientServiceErrors.min}
-                    />
-                  </div>
-
-                  {/* Max - Enabled */}
-                  <div>
-                    <Input
-                      label="Max"
-                      type="number"
-                      name="max"
-                      value={clientServiceChargeFormData.max}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, max: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, max: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            max: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, max: '' }));
-                        }
-                      }}
-                      placeholder="Max"
-                      error={clientServiceErrors.max}
-                    />
-                  </div>
-
-                  {/* In Percentage - Enabled */}
-                  <div>
-                    <Input
-                      label="In Percentage"
-                      type="number"
-                      name="in_percentage"
-                      value={clientServiceChargeFormData.in_percentage}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, in_percentage: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, in_percentage: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            in_percentage: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, in_percentage: '' }));
-                        }
-                      }}
-                      placeholder="In Percentage"
-                      error={clientServiceErrors.in_percentage}
-                    />
-                  </div>
-
-                  {/* Fixed - Enabled */}
-                  <div>
-                    <Input
-                      label="Fixed"
-                      type="number"
-                      name="fixed"
-                      value={clientServiceChargeFormData.fixed}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, fixed: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, fixed: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            fixed: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, fixed: '' }));
-                        }
-                      }}
-                      placeholder="Fixed"
-                      error={clientServiceErrors.fixed}
-                    />
-                  </div>
-
-                  {/* Per SHB/PROD/INV/Mandays - Enabled */}
-                  <div>
-                    <Input
-                      label="Per SHB/PROD/INV/Mandays"
-                      type="number"
-                      name="per_shb"
-                      value={clientServiceChargeFormData.per_shb}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, per_shb: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, per_shb: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            per_shb: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, per_shb: '' }));
-                        }
-                      }}
-                      placeholder="Per SHB/PROD/INV/Mandays"
-                      error={clientServiceErrors.per_shb}
-                    />
-                  </div>
-
-                  {/* CA Charges - Enabled */}
-                  <div>
-                    <Input
-                      label="CA Charges"
-                      type="number"
-                      name="ca_charges"
-                      value={clientServiceChargeFormData.ca_charges}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, ca_charges: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, ca_charges: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            ca_charges: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, ca_charges: '' }));
-                        }
-                      }}
-                      placeholder="CA Charges"
-                      error={clientServiceErrors.ca_charges}
-                    />
-                  </div>
-
-                  {/* CE Charges - Enabled */}
-                  <div>
-                    <Input
-                      label="CE Charges"
-                      type="number"
-                      name="ce_charges"
-                      value={clientServiceChargeFormData.ce_charges}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, ce_charges: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, ce_charges: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            ce_charges: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, ce_charges: '' }));
-                        }
-                      }}
-                      placeholder="CE Charges"
-                      error={clientServiceErrors.ce_charges}
-                    />
-                  </div>
-
-                  {/* Registration/Other Charges - Enabled */}
-                  <div>
-                    <Input
-                      label="Registration/Other Charges"
-                      type="number"
-                      name="registration_other_charges"
-                      value={clientServiceChargeFormData.registration_other_charges}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setClientServiceChargeFormData(prev => ({ ...prev, registration_other_charges: value }));
-                        if (!value.trim()) {
-                          setClientServiceErrors((prev) => ({ ...prev, registration_other_charges: '' }));
-                        } else if (!TWO_DECIMAL_NUMBER_REGEX.test(value.trim())) {
-                          setClientServiceErrors((prev) => ({
-                            ...prev,
-                            registration_other_charges: 'Please enter a valid number with up to 2 decimal places.',
-                          }));
-                        } else {
-                          setClientServiceErrors((prev) => ({ ...prev, registration_other_charges: '' }));
-                        }
-                      }}
-                      placeholder="Registration/Other Charges"
-                      error={clientServiceErrors.registration_other_charges}
-                    />
-                  </div>
-
-                  {/* Percentage + PER SHB/PROD/INV/Mandays - Enabled */}
-                  <div>
-                    <SelectBox
-                      label="Percentage + PER SHB/PROD/INV/Mandays"
-                      name="percentage_per_shb"
-                      value={clientServiceChargeFormData.percentage_per_shb}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, percentage_per_shb: e.target.value }))}
-                      options={[
-                        { value: 'No', label: 'No' },
-                        { value: 'Yes', label: 'Yes' }
-                      ]}
-                      placeholder="Select"
-                    />
-                  </div>
-
-                  {/* Fixed + % + PER SHB/PROD/INV/Mandays - Enabled */}
-                  <div>
-                    <SelectBox
-                      label="Fixed + % + PER SHB/PROD/INV/Mandays"
-                      name="fixed_percentage_per_shb"
-                      value={clientServiceChargeFormData.fixed_percentage_per_shb}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, fixed_percentage_per_shb: e.target.value }))}
-                      options={[
-                        { value: 'No', label: 'No' },
-                        { value: 'Yes', label: 'Yes' }
-                      ]}
-                      placeholder="Select"
-                    />
-                  </div>
-
-                  {/* Charges Description - Enabled (Moved to end) */}
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Charges Description
-                    </label>
-                    <textarea
-                      name="invoice_description"
-                      value={clientServiceChargeFormData.invoice_description}
-                      onChange={(e) => setClientServiceChargeFormData(prev => ({ ...prev, invoice_description: e.target.value }))}
-                      rows={2}
-                      className="input-field w-full"
-                      placeholder="Charges Description"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No client service charges data available for this group ID.</p>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -2205,6 +1940,28 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           </div>
         </div>
       )}
+
+      {/* Client Service Charges Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Client Service Charges"
+        maxWidth="max-w-6xl"
+      >
+        <ClientServiceChargeForm
+          clientServiceCharge={clientServiceCharge}
+          clientServiceChargeFormData={clientServiceChargeFormData}
+          buAddress={buAddress}
+          gstNo={gstNo}
+          scI={scI}
+          clientServiceErrors={clientServiceErrors}
+          onFormDataChange={(updates) => setClientServiceChargeFormData(prev => ({ ...prev, ...updates }))}
+          onBuAddressChange={setBuAddress}
+          onGstNoChange={setGstNo}
+          onScIChange={setScI}
+          onErrorsChange={(updates) => setClientServiceErrors(prev => ({ ...prev, ...updates }))}
+        />
+      </Modal>
     </div>
   );
 }

@@ -2,6 +2,7 @@ const mysql = require('mysql2');
 const prisma = require('../lib/prisma');
 
 // Create connection pool (kept for migration scripts)
+// Database stores dates in UTC, application uses IST for display
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'exim_user',
@@ -10,7 +11,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  timezone: process.env.DB_TIMEZONE || '+05:30' // IST timezone for India
+  timezone: '+00:00' // UTC - database always stores in UTC
 });
 
 // Get a Promise based pool

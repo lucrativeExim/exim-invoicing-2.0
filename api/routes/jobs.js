@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Job = require('../models/Job');
 const JobServiceCharge = require('../models/JobServiceCharge');
+const JobRegisterField = require('../models/JobRegisterField');
+const prisma = require('../lib/prisma');
 const { authenticate, requireRole } = require('../middleware/accessControl');
 
 // All routes require authentication
@@ -10,12 +12,179 @@ router.use(authenticate);
 // Get all jobs - Only Super Admin and Admin can access
 router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
-    const { jobRegisterId, status, invoiceReady, jobIdStatus } = req.query;
-    const jobs = await Job.findAll({ jobRegisterId, status, invoiceReady, jobIdStatus });
+    const { jobRegisterId, status, invoiceType, invoiceReady, jobIdStatus } = req.query;
+    // Support both invoiceType (new) and invoiceReady (legacy) for backward compatibility
+    const invoiceTypeParam = invoiceType || (invoiceReady === 'true' ? 'full_invoice' : invoiceReady === 'false' ? null : undefined);
+    const jobs = await Job.findAll({ jobRegisterId, status, invoiceType: invoiceTypeParam, jobIdStatus });
     res.json(jobs);
   } catch (error) {
     console.error('Error fetching jobs:', error);
     res.status(500).json({ error: 'Failed to fetch jobs' });
+  }
+});
+
+// Get attachment fields for a job by job_id or job_no - MUST come before /:id route
+router.get('/attachment-fields', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  try {
+    const { job_id, job_no } = req.query;
+    
+    if (!job_id && !job_no) {
+      return res.status(400).json({ error: 'job_id or job_no is required' });
+    }
+
+    // Find job by job_id (preferred) or job_no
+    let job;
+    try {
+      if (job_id) {
+        console.log(`[attachment-fields] Looking for job with job_id: ${job_id}`);
+        job = await prisma.job.findFirst({
+          where: {
+            id: parseInt(job_id),
+            job_id_status: { not: 'Delete' },
+          },
+          select: {
+            id: true,
+            job_no: true,
+            job_register_field_id: true,
+          },
+        });
+      } else if (job_no) {
+        console.log(`[attachment-fields] Looking for job with job_no: ${job_no}`);
+        job = await prisma.job.findFirst({
+          where: {
+            job_no: job_no,
+            job_id_status: { not: 'Delete' },
+          },
+          select: {
+            id: true,
+            job_no: true,
+            job_register_field_id: true,
+          },
+        });
+      }
+    } catch (jobError) {
+      console.error('[attachment-fields] Error finding job:', jobError);
+      return res.status(500).json({ error: 'Error finding job', details: jobError.message });
+    }
+
+    if (!job) {
+      console.log(`[attachment-fields] Job not found for ${job_id ? 'job_id: ' + job_id : 'job_no: ' + job_no}`);
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    console.log(`[attachment-fields] Found job ID: ${job.id}, job_register_field_id: ${job.job_register_field_id}`);
+
+    // If job doesn't have job_register_field_id, return empty array
+    if (!job.job_register_field_id) {
+      console.log(`[attachment-fields] Job ${job.id} has no job_register_field_id`);
+      return res.json([]);
+    }
+
+    // Get job register field
+    let jobRegisterField;
+    try {
+      jobRegisterField = await JobRegisterField.findById(job.job_register_field_id);
+    } catch (jrfError) {
+      console.error('[attachment-fields] Error finding JobRegisterField:', jrfError);
+      return res.json([]);
+    }
+    
+    if (!jobRegisterField) {
+      console.log(`[attachment-fields] JobRegisterField not found for ID: ${job.job_register_field_id}`);
+      return res.json([]);
+    }
+
+    if (!jobRegisterField.form_fields_json) {
+      console.log(`[attachment-fields] JobRegisterField ${job.job_register_field_id} has no form_fields_json`);
+      return res.json([]);
+    }
+
+    // Parse form_fields_json if it's a string
+    let formFields = jobRegisterField.form_fields_json;
+    if (typeof formFields === 'string') {
+      try {
+        formFields = JSON.parse(formFields);
+      } catch (parseError) {
+        console.error('[attachment-fields] Error parsing form_fields_json:', parseError);
+        return res.json([]);
+      }
+    }
+
+    // Handle case where formFields might be an object instead of array
+    // Some databases might store it as an object with numeric keys
+    if (formFields && typeof formFields === 'object' && !Array.isArray(formFields)) {
+      // Convert object to array if needed
+      formFields = Object.values(formFields);
+    }
+
+    // Filter fields where use_field is true and get their names
+    let fieldNames = [];
+    if (Array.isArray(formFields)) {
+      fieldNames = formFields
+        .filter(field => field && typeof field === 'object' && field.use_field === true && field.name)
+        .map(field => field.name)
+        .filter(name => name); // Remove any null/undefined names
+    }
+
+    console.log(`[attachment-fields] Found ${fieldNames.length} fields with use_field=true:`, fieldNames);
+
+    // If no fields found, return empty array
+    if (fieldNames.length === 0) {
+      return res.json([]);
+    }
+
+    // Fetch fields_master records directly using Prisma with proper filters
+    // Filter for Attachment type fields that are Active and match the field names
+    let attachmentFields = [];
+    try {
+      // Simplified query without AND clause - Prisma handles multiple conditions automatically
+      attachmentFields = await prisma.fieldsMaster.findMany({
+        where: {
+          field_name: {
+            in: fieldNames,
+          },
+          field_type: 'Attachment',
+          status: 'Active',
+          deleted_at: null,
+        },
+        select: {
+          field_name: true,
+        },
+      });
+      console.log(`[attachment-fields] Found ${attachmentFields.length} attachment fields in fields_master`);
+    } catch (dbError) {
+      console.error('[attachment-fields] Database error fetching attachment fields:', dbError);
+      console.error('[attachment-fields] Error details:', {
+        message: dbError.message,
+        code: dbError.code,
+        meta: dbError.meta,
+        stack: dbError.stack,
+      });
+      // Return empty array instead of throwing to prevent 500 error
+      attachmentFields = [];
+    }
+
+    // Create response with field names (sorted alphabetically for consistency)
+    const attachmentFieldNames = attachmentFields
+      .map(field => field && field.field_name ? field.field_name : null)
+      .filter(name => name !== null && name !== undefined) // Remove any null/undefined names
+      .sort((a, b) => a.localeCompare(b));
+
+    console.log(`[attachment-fields] Returning ${attachmentFieldNames.length} attachment field names`);
+    res.json(attachmentFieldNames);
+  } catch (error) {
+    console.error('[attachment-fields] Unexpected error:', error);
+    console.error('[attachment-fields] Error stack:', error.stack);
+    console.error('[attachment-fields] Error details:', {
+      message: error.message,
+      code: error.code,
+      meta: error.meta,
+    });
+    // Always return a valid response, even on error
+    res.status(500).json({ 
+      error: 'Failed to fetch attachment fields',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -46,8 +215,6 @@ const parseDate = (dateValue) => {
 
 // Create new job with service charges - Only Super Admin and Admin can create
 router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
-  const prisma = require('../lib/prisma');
-  
   try {
     const { job_service_charges, ...jobData } = req.body;
 
@@ -149,11 +316,29 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
         ref__date: parseDate(jobData.ref__date),
         remark: jobData.remark || null,
         status: jobData.status || null,
-        invoice_ready: jobData.invoice_ready || null,
+        invoice_type: jobData.invoice_type || null,
+        billing_type: jobData.billing_type || null,
         form_field_json_data: jobData.form_field_json_data ? (typeof jobData.form_field_json_data === 'string' ? jobData.form_field_json_data : JSON.stringify(jobData.form_field_json_data)) : null,
         job_id_status: jobData.job_id_status || 'Active',
         added_by: req.user.id ? parseInt(req.user.id) : null,
       };
+      
+      // Debug: Log invoice_type value
+      console.log('Invoice Type received in API:', jobData.invoice_type, 'Final value:', jobCreateData.invoice_type);
+      
+      // Validate invoice_type enum value if provided
+      if (jobCreateData.invoice_type && !['full_invoice', 'partial_invoice'].includes(jobCreateData.invoice_type)) {
+        return res.status(400).json({ 
+          error: `Invalid invoice_type value: ${jobCreateData.invoice_type}. Must be 'full_invoice' or 'partial_invoice'` 
+        });
+      }
+      
+      // Validate billing_type enum value if provided
+      if (jobCreateData.billing_type && !['Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'].includes(jobCreateData.billing_type)) {
+        return res.status(400).json({ 
+          error: `Invalid billing_type value: ${jobCreateData.billing_type}. Must be one of: 'Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'` 
+        });
+      }
 
       // Create job using transaction client
       const job = await tx.job.create({
@@ -273,7 +458,9 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
     
     res.status(500).json({ 
       error: errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      code: error.code,
+      meta: error.meta
     });
   }
 });
@@ -385,6 +572,107 @@ router.get('/service-charges/next-group-id', requireRole(['Super_Admin', 'Admin'
   } catch (error) {
     console.error('Error getting next group ID:', error);
     res.status(500).json({ error: 'Failed to get next group ID' });
+  }
+});
+
+router.get('/:id/get-attachment-types', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate ID parameter
+    const jobId = parseInt(id);
+    if (isNaN(jobId) || jobId <= 0) {
+      return res.status(400).json({ error: 'Invalid job ID provided' });
+    }
+    
+    // Fetch job with jobRegisterField including form_fields_json
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      include: {
+        jobRegisterField: {
+          select: {
+            id: true,
+            form_fields_json: true,
+          },
+        },
+      },
+    });
+    
+    // Check if job exists
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    // Check if jobRegisterField exists
+    if (!job.jobRegisterField) {
+      return res.status(404).json({ error: 'Job Register Field not found for this job' });
+    }
+    
+    // Validate form_fields_json exists and is an array
+    if (!job.jobRegisterField.form_fields_json) {
+      return res.status(404).json({ error: 'Form fields JSON not found for this job register field' });
+    }
+    
+    if (!Array.isArray(job.jobRegisterField.form_fields_json)) {
+      return res.status(400).json({ error: 'Form fields JSON is not a valid array' });
+    }
+    
+    // Extract field names that have use_field === true
+    let field_names = [];
+    try {
+      field_names = job.jobRegisterField.form_fields_json
+        .filter(field => field && field.use_field === true && field.name)
+        .map(field => field.name)
+        .filter(name => name); // Remove any null/undefined names
+    } catch (filterError) {
+      console.error('Error filtering form fields:', filterError);
+      return res.status(400).json({ error: 'Error processing form fields JSON structure' });
+    }
+    
+    // Check if any field names were found
+    if (!field_names || field_names.length === 0) {
+      console.log("No attachment fields found with use_field === true");
+      return res.json([]); // Return empty array instead of null
+    }
+    
+    console.log("field_names:", field_names);
+    
+    // Fetch field master records
+    let field_master = [];
+    try {
+      field_master = await prisma.fieldsMaster.findMany({
+        where: {
+          field_name: { in: field_names },
+          field_type: "Attachment"
+        },
+        select: {
+          id: true,
+          field_name: true
+        }
+      });
+    } catch (dbError) {
+      console.error('Error fetching field master records:', dbError);
+      return res.status(500).json({ error: 'Failed to fetch field master records from database' });
+    }
+    
+    // Return the field master records
+    res.json(field_master || []);
+  } catch (error) {
+    console.error('Error fetching Attachment Types:', error);
+    
+    // Handle Prisma-specific errors
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Database constraint violation' });
+    }
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    
+    // Generic error response
+    res.status(500).json({ 
+      error: 'Failed to fetch Attachment Types',
+      message: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

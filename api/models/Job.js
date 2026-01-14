@@ -37,7 +37,7 @@ class JobModel {
       'import_date', 'actual_duty_credit_refund_sanctioned_amount',
       'normal_retro', 'cus_clearance', 'type_of_ims', 'bis', 'ims', 'scomet',
       'inv_no', 'inv_date', 'dbk_claim_no', 'dbk_claim_date',
-      'ref__no', 'ref__date', 'remark', 'status', 'invoice_ready',
+      'ref__no', 'ref__date', 'remark', 'status', 'invoice_type',
       'job_id_status', 'added_by', 'deleted_by',
     ];
   }
@@ -163,7 +163,7 @@ class JobModel {
       includeDeleted = false,
       jobRegisterId = null,
       status = null,
-      invoiceReady = null,
+      invoiceType = null,
       jobIdStatus = null,
     } = options;
 
@@ -183,8 +183,8 @@ class JobModel {
       where.status = status;
     }
     
-    if (invoiceReady) {
-      where.invoice_ready = invoiceReady;
+    if (invoiceType) {
+      where.invoice_type = invoiceType;
     }
 
     return await prisma.job.findMany({
@@ -262,6 +262,9 @@ class JobModel {
         jobRegisterField: {
           select: {
             id: true,
+            form_fields_json: true,
+            job_register_id: true,
+            status: true,
           },
         },
         clientInfo: {
@@ -372,7 +375,7 @@ class JobModel {
       ref__date,
       remark,
       status,
-      invoice_ready,
+      invoice_type,
       form_field_json_data,
       job_id_status,
       added_by,
@@ -464,7 +467,7 @@ class JobModel {
       ref__date: parseDate(ref__date),
       remark: remark || null,
       status: status || null,
-      invoice_ready: invoice_ready || null,
+      invoice_type: invoice_type || null,
       job_id_status: job_id_status || 'Active',
       added_by: added_by ? parseInt(added_by) : null,
     };
@@ -528,7 +531,7 @@ class JobModel {
       'duty_credit_refund_sanctioned_exempted_amount',
       'actual_duty_credit_refund_sanctioned_amount',
       'normal_retro', 'cus_clearance', 'type_of_ims', 'bis', 'ims', 'scomet',
-      'inv_no', 'dbk_claim_no', 'ref__no', 'remark', 'status', 'invoice_ready',
+      'inv_no', 'dbk_claim_no', 'ref__no', 'remark', 'status', 'invoice_type',
       'form_field_json_data', 'job_id_status',
     ];
 

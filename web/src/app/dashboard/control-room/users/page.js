@@ -9,6 +9,7 @@ import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
 import UserForm from './UserForm';
 import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 
 export default function UsersPage() {
   const router = useRouter();
@@ -250,11 +251,11 @@ export default function UsersPage() {
       )}
 
       {/* Page Header */}
-      <div className="mb-6 flex items-center justify-between">
-            <div>
+      <div className="mb-2 flex items-center justify-end">
+            {/* <div>
               <h1 className="text-2xl font-bold text-gray-900 mb-1">Users</h1>
               <p className="text-sm text-gray-600">Manage system users and their access</p>
-            </div>
+            </div> */}
             <Button
               onClick={() => {
                 if (showAddForm) {
@@ -302,6 +303,9 @@ export default function UsersPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Name
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -322,14 +326,24 @@ export default function UsersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {users.map((userItem) => (
                       <tr key={userItem.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(userItem)}
+                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
+                            title="Edit"
+                            aria-label="Edit user"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
                             {userItem.first_name} {userItem.last_name}
@@ -386,22 +400,7 @@ export default function UsersPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {userItem.created_at
-                            ? new Date(userItem.created_at).toLocaleDateString()
-                            : 'N/A'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            type="button"
-                            onClick={() => handleEdit(userItem)}
-                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
-                            title="Edit"
-                            aria-label="Edit user"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
+                          {formatDateDDMMYYYY(userItem.created_at)}
                         </td>
                       </tr>
                     ))}

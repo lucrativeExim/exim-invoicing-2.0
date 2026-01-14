@@ -47,12 +47,14 @@ class ClientServiceChargeModel {
           select: {
             id: true,
             client_name: true,
+            status: true,
           },
         },
         clientBu: {
           select: {
             id: true,
             bu_name: true,
+            status: true,
           },
         },
         jobRegister: {
@@ -98,12 +100,14 @@ class ClientServiceChargeModel {
           select: {
             id: true,
             client_name: true,
+            status: true,
           },
         },
         clientBu: {
           select: {
             id: true,
             bu_name: true,
+            status: true,
           },
         },
         jobRegister: {

@@ -15,9 +15,9 @@ const ClientBu = require('./ClientBu');
 const ClientServiceCharge = require('./ClientServiceCharge');
 const Job = require('./Job');
 const JobServiceCharge = require('./JobServiceCharge');
+const Invoice = require('./Invoice');
 
 // Add more models as you create them
-// const Invoice = require('./Invoice');
 // etc...
 
 module.exports = {
@@ -33,6 +33,6 @@ module.exports = {
   ClientServiceCharge,
   Job,
   JobServiceCharge,
-  // Invoice,
+  Invoice,
 };
 

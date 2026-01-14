@@ -8,6 +8,7 @@ import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
 import GstRateForm from './GstRateForm';
 import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 
 export default function GstRatesPage() {
   const router = useRouter();
@@ -191,11 +192,11 @@ export default function GstRatesPage() {
       )}
 
       {/* Page Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
+      <div className="mb-2 flex items-center justify-end">
+        {/* <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">GST Rates</h1>
           <p className="text-sm text-gray-600">Manage GST rates and tax percentages</p>
-        </div>
+        </div> */}
         <Button
           onClick={() => {
             if (showAddForm) {
@@ -241,6 +242,9 @@ export default function GstRatesPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     SAC Number
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -255,39 +259,11 @@ export default function GstRatesPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Created At
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {gstRates.map((gstRate) => (
                   <tr key={gstRate.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {gstRate.sac_no || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {gstRate.sgst !== null && gstRate.sgst !== undefined ? `${gstRate.sgst}%` : 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {gstRate.cgst !== null && gstRate.cgst !== undefined ? `${gstRate.cgst}%` : 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {gstRate.igst !== null && gstRate.igst !== undefined ? `${gstRate.igst}%` : 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {gstRate.created_at
-                        ? new Date(gstRate.created_at).toLocaleDateString()
-                        : 'N/A'}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
                         <button
@@ -344,6 +320,29 @@ export default function GstRatesPage() {
                           </>
                         )}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {gstRate.sac_no || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {gstRate.sgst !== null && gstRate.sgst !== undefined ? `${gstRate.sgst}%` : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {gstRate.cgst !== null && gstRate.cgst !== undefined ? `${gstRate.cgst}%` : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {gstRate.igst !== null && gstRate.igst !== undefined ? `${gstRate.igst}%` : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDateDDMMYYYY(gstRate.created_at)}
                     </td>
                   </tr>
                 ))}

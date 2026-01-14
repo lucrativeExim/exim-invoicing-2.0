@@ -2,13 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { accessControl } from '@/services/accessControl';
+
+// Import logo from assets/images folder
+// Make sure to add logo.png file to: web/src/assets/images/logo.png
+import logoImage from '@/assets/images/logo.png';
 
 const Sidebar = ({ isCollapsed, onToggle }) => {
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState({});
   const [canManageUsers, setCanManageUsers] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     setCanManageUsers(accessControl.canManageUsers());
@@ -21,13 +27,22 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
       }));
     }
     
-    // Auto-expand JOB menu if on job page
+    // Auto-expand Job menu if on job page
     if (pathname.startsWith('/dashboard/job')) {
       setExpandedMenus((prev) => ({
         ...prev,
-        'JOB': true,
+        'Job': true,
       }));
     }
+    
+    // Auto-expand Invoice menu if on invoice page
+    if (pathname.startsWith('/dashboard/invoice')) {
+      setExpandedMenus((prev) => ({
+        ...prev,
+        'Invoice': true,
+      }));
+    }
+    
   }, [pathname]);
 
   const menuItems = [
@@ -39,15 +54,6 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
         </svg>
       ),
       path: '/dashboard',
-    },
-    {
-      name: 'Invoices',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-      path: '/invoices',
     },
     {
       name: 'Customers',
@@ -76,21 +82,6 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
       ),
       path: '/reports',
     },
-    {
-      name: 'JOB',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-      ),
-      path: '/dashboard/job',
-      children: [
-        {
-          name: 'Job',
-          path: '/dashboard/job/job',
-        },
-      ],
-    },
     ...(canManageUsers
       ? [
           {
@@ -111,10 +102,6 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
                 path: '/dashboard/control-room/accounts',
               },
               {
-                name: 'Client',
-                path: '/dashboard/control-room/client',
-              },
-              {
                 name: 'GST Rates',
                 path: '/dashboard/control-room/gst-rates',
               },
@@ -126,10 +113,48 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
                 name: 'Job Register',
                 path: '/dashboard/control-room/job-register',
               },
+              {
+                name: 'Client',
+                path: '/dashboard/control-room/client',
+              },
             ],
           },
         ]
       : []),
+      {
+        name: 'Job',
+        icon: (
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          </svg>
+        ),
+        path: '/dashboard/job/job',
+        children: [
+          {
+            name: 'job',
+            path: '/dashboard/job/job',
+          },
+        ],
+      },
+      {
+        name: 'Invoice',
+        icon: (
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        path: '/dashboard/invoice/invoice-creation',
+        children: [
+          {
+            name: 'Invoice Creation',
+            path: '/dashboard/invoice/invoice-creation',
+          },
+          {
+            name: 'Invoices',
+            path: '/dashboard/invoice/invoices',
+          },
+        ],
+      },
     {
       name: 'Settings',
       icon: (
@@ -163,7 +188,7 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
 
   return (
     <aside
-      className={`bg-white border-r border-gray-200 transition-all duration-300 ease-in-out flex flex-col ${
+      className={`fixed left-0 top-0 h-screen bg-white border-r border-gray-200 transition-all duration-300 ease-in-out flex flex-col z-30 ${
         isCollapsed ? 'w-16' : 'w-64'
       }`}
     >
@@ -171,19 +196,41 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
       <div className="h-16 flex items-center justify-between px-3 border-b border-gray-200">
         {!isCollapsed && (
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0 bg-yellow-50">
+              {!logoError ? (
+                <Image
+                  src={logoImage}
+                  alt="Lucrative Logo"
+                  width={32}
+                  height={32}
+                  className="w-full h-full object-contain"
+                  onError={() => setLogoError(true)}
+                />
+              ) : (
+                <div className="w-full h-full bg-yellow-400 rounded-lg flex items-center justify-center">
+                  <div className="w-5 h-5 bg-yellow-500 rounded-full"></div>
+                </div>
+              )}
             </div>
-            <span className="font-bold text-gray-900 text-sm">EXIM</span>
+            <span className="font-bold text-gray-900 text-sm">Lucrative</span>
           </div>
         )}
         {isCollapsed && (
-          <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center mx-auto">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto overflow-hidden bg-yellow-50">
+            {!logoError ? (
+              <Image
+                src={logoImage}
+                alt="Lucrative Logo"
+                width={32}
+                height={32}
+                className="w-full h-full object-contain"
+                onError={() => setLogoError(true)}
+              />
+            ) : (
+              <div className="w-full h-full bg-yellow-400 rounded-lg flex items-center justify-center">
+                <div className="w-5 h-5 bg-yellow-500 rounded-full"></div>
+              </div>
+            )}
           </div>
         )}
         <button
@@ -255,7 +302,7 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
                                 }`}
                               >
                                 <span className="w-2 h-2 rounded-full bg-gray-400"></span>
-                                <span className="text-sm font-medium">{child.name}</span>
+                                <span className="text-sm font-medium capitalize">{child.name}</span>
                               </Link>
                             </li>
                           );
@@ -277,7 +324,7 @@ const Sidebar = ({ isCollapsed, onToggle }) => {
                       {item.icon}
                     </span>
                     {!isCollapsed && (
-                      <span className="text-sm font-medium flex-1">{item.name}</span>
+                      <span className="text-sm font-medium flex-1 capitalize">{item.name}</span>
                     )}
                   </Link>
                 )}

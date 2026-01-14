@@ -44,21 +44,27 @@ export default function DashboardLayout({ children }) {
 
   return (
     <AccountProvider>
-      <div className="min-h-screen bg-gray-50 flex">
-        {/* Sidebar */}
-        <Sidebar isCollapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      <PageTitleProvider>
+        <div className="min-h-screen bg-gray-50">
+          {/* Sidebar - Fixed */}
+          <Sidebar isCollapsed={sidebarCollapsed} onToggle={toggleSidebar} />
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Header */}
-          <Header user={user} />
+          {/* Header - Fixed */}
+          <Header user={user} sidebarCollapsed={sidebarCollapsed} />
 
           {/* Main Content */}
-          <main className="flex-1 overflow-y-auto p-4">
+          <main 
+            className="overflow-y-auto p-4 transition-all duration-300" 
+            style={{ 
+              marginLeft: sidebarCollapsed ? '64px' : '256px',
+              marginTop: '56px',
+              minHeight: 'calc(100vh - 56px)'
+            }}
+          >
             {children}
           </main>
         </div>
-      </div>
+      </PageTitleProvider>
     </AccountProvider>
   );
 }

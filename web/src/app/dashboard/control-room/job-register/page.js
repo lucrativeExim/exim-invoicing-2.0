@@ -8,6 +8,7 @@ import { Button } from '@/components/formComponents';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
 import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 
 export default function JobRegisterPage() {
   const router = useRouter();
@@ -97,7 +98,7 @@ export default function JobRegisterPage() {
       )}
 
       {/* Page Header */}
-      <div className="mb-6 flex items-center justify-end">
+      <div className="mb-2 flex items-center justify-end">
         <Link href="/dashboard/control-room/job-register/add">
           <Button variant="primary">
             Add New Job Register
@@ -123,6 +124,9 @@ export default function JobRegisterPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Job Code
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -140,48 +144,11 @@ export default function JobRegisterPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Created At
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {jobRegisters.map((jobRegister) => (
                   <tr key={jobRegister.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {jobRegister.job_code || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {jobRegister.job_title || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {jobRegister.job_type || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {jobRegister.gstRate?.sac_no || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadgeClass(
-                          jobRegister.status
-                        )}`}
-                      >
-                        {formatStatus(jobRegister.status)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {jobRegister.created_at
-                        ? new Date(jobRegister.created_at).toLocaleDateString()
-                        : 'N/A'}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
                         <Link href={`/dashboard/control-room/job-register/edit/${jobRegister.id}`}>
@@ -239,6 +206,38 @@ export default function JobRegisterPage() {
                           </>
                         )}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {jobRegister.job_code || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {jobRegister.job_title || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {jobRegister.job_type || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {jobRegister.gstRate?.sac_no || 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadgeClass(
+                          jobRegister.status
+                        )}`}
+                      >
+                        {formatStatus(jobRegister.status)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDateDDMMYYYY(jobRegister.created_at)}
                     </td>
                   </tr>
                 ))}

@@ -1,0 +1,166 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { SelectBox } from '@/components/formComponents';
+import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+
+export default function InvoicesPage() {
+  const [invoiceType, setInvoiceType] = useState('');
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const invoiceTypeOptions = [
+    { value: 'draft', label: 'Draft Invoice' },
+    { value: 'performa', label: 'Performa Invoice' },
+  ];
+
+  const handleInvoiceTypeChange = (e) => {
+    setInvoiceType(e.target.value);
+  };
+
+  // Fetch invoices when invoice type changes
+  useEffect(() => {
+    const fetchInvoices = async () => {
+      if (!invoiceType) {
+        setInvoices([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        let invoiceStatus = 'Active';
+        let invoiceStageStatus = '';
+
+        if (invoiceType === 'draft') {
+          invoiceStageStatus = 'Draft';
+        } else if (invoiceType === 'performa') {
+          invoiceStageStatus = 'Performa';
+        }
+
+        const response = await api.get('/invoices', {
+          params: {
+            invoice_status: invoiceStatus,
+            invoice_stage_status: invoiceStageStatus,
+          },
+        });
+
+        setInvoices(response.data || []);
+      } catch (error) {
+        console.error('Error fetching invoices:', error);
+        setInvoices([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInvoices();
+  }, [invoiceType]);
+
+
+  // Format amount for display
+  const formatAmount = (amount) => {
+    if (!amount) return '-';
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(parseFloat(amount));
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-1">
+      <div className="mx-auto">
+        <div className="grid grid-cols-12 gap-4 mb-4">
+          {/* Invoice Type Dropdown */}
+          <div className="col-span-4">
+            <SelectBox
+              label="Invoice Type"
+              name="invoiceType"
+              value={invoiceType}
+              onChange={handleInvoiceTypeChange}
+              options={invoiceTypeOptions}
+              placeholder="Select invoice type..."
+              isClearable={true}
+              isSearchable={false}
+            />
+          </div>
+        </div>
+
+        {/* Invoices Table */}
+        {invoiceType && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {invoiceType === 'draft' ? 'Draft Invoices' : 'Performa Invoices'}
+              </h2>
+            </div>
+            {loading ? (
+              <div className="p-8 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                <p className="mt-2 text-gray-600">Loading invoices...</p>
+              </div>
+            ) : invoices.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">No invoices found</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        {invoiceType === 'draft' ? 'Draft ID' : 'Performa ID'}
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Job Register
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Billing Type
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Invoice Type
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Created At
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Created By
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {invoices.map((invoice) => (
+                      <tr key={invoice.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {invoiceType === 'draft' ? invoice.draft_view_id || '-' : invoice.performa_view_id || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {invoice.jobRegister?.job_code || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {invoice.billing_type || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {invoice.invoice_type || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {formatDateDDMMYYYY(invoice.created_at)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {invoice.addedByUser
+                            ? `${invoice.addedByUser.first_name} ${invoice.addedByUser.last_name}`
+                            : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

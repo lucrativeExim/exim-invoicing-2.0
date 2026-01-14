@@ -397,7 +397,8 @@ model Job {
   ref__date                               DateTime? @db.Date
   remark                                  String?   @db.Text
   status                                  JobStatus?
-  invoice_ready                           InvoiceReady?
+  invoice_type                            InvoiceType?
+  billing_type                            BillingType?
   form_field_json_data                    String?   @db.Text
   job_id_status                           JobIdStatus?
   created_at                              DateTime? @default(now()) @db.DateTime(0)
@@ -414,6 +415,7 @@ model Job {
   deletedByUser       User?               @relation("JobDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   jobAttachments      JobAttachment[]
   jobServiceCharges   JobServiceCharge[]
+  invoiceSelectedJobs InvoiceSelectedJob[]
 
   @@index([job_register_id], name: "idx_job_register_id")
   @@index([job_register_field_id], name: "idx_job_register_field_id")
@@ -424,7 +426,8 @@ model Job {
   @@index([claim_no], name: "idx_claim_no")
   @@index([job_date], name: "idx_job_date")
   @@index([status], name: "idx_status")
-  @@index([invoice_ready], name: "idx_invoice_ready")
+  @@index([invoice_type], name: "idx_invoice_type")
+  @@index([billing_type], name: "idx_billing_type")
   @@index([job_id_status], name: "idx_job_id_status")
   @@index([created_at], name: "idx_created_at")
   @@index([added_by], name: "idx_added_by")
@@ -439,9 +442,16 @@ enum JobStatus {
   Closed
 }
 
-enum InvoiceReady {
-  true
-  false
+enum InvoiceType {
+  full_invoice
+  partial_invoice
+}
+
+enum BillingType {
+  Reimbursement
+  Service_Reimbursement
+  Service
+  Service_Reimbursement_Split
 }
 
 enum JobIdStatus {
@@ -614,7 +624,7 @@ model Invoice {
   draft_view_id               String?                @db.VarChar(255)
   performa_view_id             String?                @db.VarChar(255)
   job_register_id              Int?
-  service_type                 String?                @db.VarChar(255)
+  billing_type                 String?                @db.VarChar(255)
   invoice_type                 String?               @db.VarChar(255)
   pay_amount                   String?               @db.VarChar(255)
   amount                       String?                @db.VarChar(255)
@@ -693,13 +703,16 @@ enum InvoiceStageStatus {
 model InvoiceSelectedJob {
   id          Int       @id @default(autoincrement())
   invoice_id  Int?
+  job_id      Int?
   created_at  DateTime? @default(now()) @db.DateTime(0)
   created_by  Int?
 
   invoice     Invoice?  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  job         Job?      @relation(fields: [job_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   createdByUser User?   @relation("InvoiceSelectedJobCreatedBy", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([invoice_id], name: "idx_invoice_id")
+  @@index([job_id], name: "idx_job_id")
   @@index([created_at], name: "idx_created_at")
   @@index([created_by], name: "idx_created_by")
   @@map("invoice_selected_jobs")
@@ -775,16 +788,17 @@ model FieldsMaster {
 
 // Job Reports
 model JobReport {
-  id          Int              @id @default(autoincrement())
-  report_name String?          @db.VarChar(255)
-  status      String?          @db.Text
-  job_status  JobReportStatus?
-  account_ids String?          @db.Text
-  job_ids     String?          @db.Text
-  client_ids  String?          @db.Text
-  job_fields  String?          @db.Text
-  created_at DateTime?         @default(now()) @db.DateTime(0)
-  deleted_at DateTime?         @db.DateTime(0)
+  id          Int                    @id @default(autoincrement())
+  report_name String?                @db.VarChar(255)
+  status      JobReportStatusFilter?
+  report_status JobReportStatus?
+  invoice_type JobReportInvoiceType?
+  account_ids String?                @db.Text
+  job_ids     String?                @db.Text
+  client_ids  String?                @db.Text
+  job_fields  String?                @db.Text
+  created_at DateTime?               @default(now()) @db.DateTime(0)
+  deleted_at DateTime?               @db.DateTime(0)
   added_by   Int?
   deleted_by Int?
 
@@ -792,16 +806,30 @@ model JobReport {
   deletedByUser User?          @relation("JobReportDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([report_name], name: "idx_report_name")
-  @@index([job_status], name: "idx_job_status")
+  @@index([status], name: "idx_status")
+  @@index([report_status], name: "idx_report_status")
+  @@index([invoice_type], name: "idx_invoice_type")
   @@index([created_at], name: "idx_created_at")
   @@index([added_by], name: "idx_added_by")
   @@index([deleted_by], name: "idx_deleted_by")
   @@map("job_reports")
 }
 
+enum JobReportStatusFilter {
+  In_process
+  Closed
+  Both
+}
+
 enum JobReportStatus {
   Active
   Delete
+}
+
+enum JobReportInvoiceType {
+  Full_Invoice
+  Partial_Invoice
+  Both
 }
 
 // User Settings

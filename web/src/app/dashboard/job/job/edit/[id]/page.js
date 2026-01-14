@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import AddJobPage from '../../add/page';
 import api from '@/services/api';
+import { usePageTitle } from '@/context/PageTitleContext';
 
 export default function EditJobPage() {
   const params = useParams();
@@ -12,6 +13,7 @@ export default function EditJobPage() {
   const [jobData, setJobData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { setPageTitle } = usePageTitle();
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -25,16 +27,29 @@ export default function EditJobPage() {
         setLoading(true);
         const response = await api.get(`/jobs/${jobId}`);
         setJobData(response.data);
+        
+        // Set page title with job_no if available
+        if (response.data?.job_no) {
+          setPageTitle(`Edit Job - ${response.data.job_no}`);
+        } else {
+          setPageTitle('Edit Job');
+        }
       } catch (err) {
         console.error('Error fetching job:', err);
         setError(err.response?.data?.error || 'Failed to fetch job');
+        setPageTitle('Edit Job');
       } finally {
         setLoading(false);
       }
     };
 
     fetchJob();
-  }, [jobId]);
+
+    // Cleanup: clear page title when component unmounts
+    return () => {
+      setPageTitle(null);
+    };
+  }, [jobId, setPageTitle]);
 
   if (loading) {
     return (
@@ -54,7 +69,7 @@ export default function EditJobPage() {
           <p className="text-red-600 mb-4">{error}</p>
           <button
             onClick={() => router.back()}
-            className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg"
+            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
           >
             Go Back
           </button>
@@ -70,8 +85,8 @@ export default function EditJobPage() {
           <p className="text-gray-600 mb-4">Job not found</p>
           <button
             onClick={() => router.back()}
-            className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg"
-          >
+            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
+          > 
             Go Back
           </button>
         </div>
