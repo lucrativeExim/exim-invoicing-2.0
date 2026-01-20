@@ -64,6 +64,8 @@ model User {
   jobRegisterFieldsUpdated JobRegisterField[] @relation("JobRegisterFieldUpdatedBy")
   jobs                  Job[] @relation("JobAddedBy")
   jobsDeleted           Job[] @relation("JobDeletedBy")
+  jobsAsOwner           Job[] @relation("JobOwner")
+  jobsAsProcessor       Job[] @relation("JobProcessor")
   jobAttachments        JobAttachment[] @relation("JobAttachmentAddedBy")
   jobAttachmentsDeleted JobAttachment[] @relation("JobAttachmentDeletedBy")
   jobServiceCharges     JobServiceCharge[] @relation("JobServiceChargeAddedBy")
@@ -329,72 +331,9 @@ model Job {
   job_register_field_id                  Int?
   client_info_id                         Int?
   client_bu_id                           Int?
-  type_of_unit                           String?   @db.VarChar(255)
-  job_owner                              String?   @db.VarChar(255)
-  job_owner_email_id                     String?   @db.VarChar(255)
-  job_owner_phone_no                     Float?
-  processor                              String?   @db.VarChar(255)
-  processor_email_id                     String?   @db.VarChar(255)
-  processor_phone_no                     Float?
-  port                                   String?   @db.VarChar(255)
-  claim_no                               String?   @db.VarChar(255)
-  po_no                                  String?   @db.VarChar(255)
-  quantity                               String?   @db.VarChar(255)
-  description_of_quantity                String?   @db.VarChar(255)
-  job_date                               DateTime? @db.Date
-  application_target_date                DateTime? @db.Date
-  application_date                       DateTime? @db.Date
-  application                            String?   @db.VarChar(255)
-  claim_amount_after_finalization        String?   @db.VarChar(255)
-  appl_fee_duty_paid                     String?   @db.VarChar(255)
-  appl_fees_reference_no                 String?   @db.VarChar(255)
-  app_fees_payt_date                     DateTime? @db.Date
-  eft_attachment                         String?   @db.VarChar(255)
-  bank_name                              String?   @db.VarChar(255)
-  application_ref_no                     String?   @db.VarChar(255)
-  application_ref_date                   DateTime? @db.Date
-  cac                                    DateTime? @db.Date
-  cac_attachment                         String?   @db.VarChar(255)
-  cec                                    DateTime? @db.Date
-  cec_attachment                         String?   @db.VarChar(255)
-  no_of_cac                              String?   @db.VarChar(255)
-  no_of_cec                              String?   @db.VarChar(255)
-  submission_target_date                 DateTime? @db.Date
-  submission_date                        DateTime? @db.Date
-  acknowlegment                          String?   @db.VarChar(255)
-  submitted_to                           String?   @db.VarChar(255)
-  file_no                                String?   @db.VarChar(255)
-  file_date                              DateTime? @db.Date
-  job_verification_target_date          DateTime? @db.Date
-  job_verification_date                  DateTime? @db.Date
-  sanction_approval_target_date          DateTime? @db.Date
-  sanction___approval_date               DateTime? @db.Date
-  authorisation_no                       String?   @db.VarChar(255)
-  duty_credit_scrip_no                   String?   @db.VarChar(255)
-  license_no                             String?   @db.VarChar(255)
-  certificate_no                         String?   @db.VarChar(255)
-  refund_sanction_order_no               String?   @db.VarChar(255)
-  brand_rate_letter_no                   String?   @db.VarChar(255)
-  lic_scrip_order_cert_amendment_no     String?   @db.VarChar(255)
-  date                                   String?   @db.VarChar(255)
-  refund_order_license_approval_brl_certificate_attachment String? @db.VarChar(255)
-  duty_credit_refund_sanctioned_exempted_amount String? @db.VarChar(255)
-  license_registration_target_date       DateTime? @db.Date
-  license_registration_date              DateTime? @db.Date
-  import_date                            DateTime? @db.Date
-  actual_duty_credit_refund_sanctioned_amount String? @db.VarChar(255)
-  normal_retro                           String?   @db.VarChar(255)
-  cus_clearance                          String?   @db.VarChar(255)
-  type_of_ims                             String?   @db.VarChar(255)
-  bis                                     String?   @db.VarChar(255)
-  ims                                     String?   @db.VarChar(255)
-  scomet                                  String?   @db.VarChar(255)
-  inv_no                                  String?   @db.VarChar(255)
-  inv_date                                DateTime? @db.Date
-  dbk_claim_no                            String?   @db.VarChar(255)
-  dbk_claim_date                          DateTime? @db.Date
-  ref__no                                 String?   @db.VarChar(255)
-  ref__date                               DateTime? @db.Date
+  job_owner_id                           Int?
+  processor_id                           Int?
+  job_date                               DateTime? @db.DateTime(0)
   remark                                  String?   @db.Text
   status                                  JobStatus?
   invoice_type                            InvoiceType?
@@ -411,20 +350,22 @@ model Job {
   jobRegisterField    JobRegisterField?   @relation(fields: [job_register_field_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   clientInfo          ClientInfo?          @relation(fields: [client_info_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   clientBu            ClientBu?            @relation(fields: [client_bu_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  jobOwner            User?               @relation("JobOwner", fields: [job_owner_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  processor           User?               @relation("JobProcessor", fields: [processor_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   addedByUser         User?               @relation("JobAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   deletedByUser       User?               @relation("JobDeletedBy", fields: [deleted_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   jobAttachments      JobAttachment[]
   jobServiceCharges   JobServiceCharge[]
   invoiceSelectedJobs InvoiceSelectedJob[]
+  jobFieldValues      JobFieldValue[]
 
   @@index([job_register_id], name: "idx_job_register_id")
   @@index([job_register_field_id], name: "idx_job_register_field_id")
   @@index([client_info_id], name: "idx_client_info_id")
   @@index([client_bu_id], name: "idx_client_bu_id")
+  @@index([job_owner_id], name: "idx_job_owner_id")
+  @@index([processor_id], name: "idx_processor_id")
   @@index([job_no], name: "idx_job_no")
-  @@index([po_no], name: "idx_po_no")
-  @@index([claim_no], name: "idx_claim_no")
-  @@index([job_date], name: "idx_job_date")
   @@index([status], name: "idx_status")
   @@index([invoice_type], name: "idx_invoice_type")
   @@index([billing_type], name: "idx_billing_type")
@@ -432,9 +373,24 @@ model Job {
   @@index([created_at], name: "idx_created_at")
   @@index([added_by], name: "idx_added_by")
   @@index([deleted_by], name: "idx_deleted_by")
-  @@index([application_date], name: "idx_application_date")
-  @@index([submission_date], name: "idx_submission_date")
   @@map("job")
+}
+
+// Job Field Value - Stores dynamic form field values for jobs
+model JobFieldValue {
+  id          Int       @id @default(autoincrement())
+  job_id      Int
+  field_name  String    @db.VarChar(255)
+  field_value String?   @db.Text
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  updated_at  DateTime? @db.DateTime(0)
+
+  job         Job       @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([job_id, field_name], name: "job_id_field_name")
+  @@index([job_id], name: "idx_job_id")
+  @@index([field_name], name: "idx_field_name")
+  @@map("job_field_values")
 }
 
 enum JobStatus {
@@ -626,22 +582,22 @@ model Invoice {
   job_register_id              Int?
   billing_type                 String?                @db.VarChar(255)
   invoice_type                 String?               @db.VarChar(255)
-  pay_amount                   String?               @db.VarChar(255)
-  amount                       String?                @db.VarChar(255)
-  professional_charges        Decimal?              @db.Decimal(10, 0) @default(0)
-  registration_other_charges   Decimal?              @db.Decimal(10, 0) @default(0)
-  ca_charges                   Decimal?              @db.Decimal(10, 0) @default(0)
-  ce_charges                   Decimal?              @db.Decimal(10, 0) @default(0)
+  pay_amount                   Decimal?              @db.Decimal(10, 2) @default(0)
+  amount                       Decimal?              @db.Decimal(10, 2) @default(0)
+  professional_charges        Decimal?              @db.Decimal(10, 2) @default(0)
+  registration_other_charges   Decimal?              @db.Decimal(10, 2) @default(0)
+  ca_charges                   Decimal?              @db.Decimal(10, 2) @default(0)
+  ce_charges                   Decimal?              @db.Decimal(10, 2) @default(0)
   ca_cert_count                Int?
   ce_cert_count                Int?
-  application_fees             Decimal?               @db.Decimal(10, 0) @default(0)
-  remi_one_charges             Decimal?              @db.Decimal(10, 0) @default(0)
-  remi_two_charges             Decimal?              @db.Decimal(10, 0) @default(0)
-  remi_three_charges           Decimal?              @db.Decimal(10, 0) @default(0)
-  remi_four_charges            Decimal?              @db.Decimal(10, 0) @default(0)
-  remi_five_charges            String?               @db.VarChar(255)
+  application_fees             Decimal?               @db.Decimal(10, 2) @default(0)
+  remi_one_charges             Decimal?              @db.Decimal(10, 2) @default(0)
+  remi_two_charges             Decimal?              @db.Decimal(10, 2) @default(0)
+  remi_three_charges           Decimal?              @db.Decimal(10, 2) @default(0)
+  remi_four_charges            Decimal?              @db.Decimal(10, 2) @default(0)
+  remi_five_charges            Decimal?              @db.Decimal(10, 2) @default(0)
   reward_penalty_input         String?                @db.VarChar(255) @default("0")
-  reward_penalty_amount        Decimal?               @db.Decimal(10, 0) @default(0)
+  reward_penalty_amount        Decimal?               @db.Decimal(10, 2) @default(0)
   note                         String?               @db.Text
   po_no                        String?               @db.VarChar(255)
   irn_no                       String?              @db.VarChar(255)

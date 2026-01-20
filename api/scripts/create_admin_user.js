@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 
 async function createAdminUser() {
   try {
-    const email = 'admin2@lucrative.co.in';
+    const email = 'admin@lucrative.co.in';
     const password = 'admin@123';
     
     // Check if user already exists
@@ -41,8 +41,8 @@ async function createAdminUser() {
     console.log('Role:', newUser.user_role);
     console.log('Status:', newUser.status);
     console.log('\n📝 Login credentials:');
-    console.log('Email: admin@lucrative.co.in');
-    console.log('Password: admin@123');
+    console.log('Email:', email);
+    console.log('Password:', password);
     
     await prisma.$disconnect();
     process.exit(0);

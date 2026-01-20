@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { SelectBox } from '@/components/formComponents';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 
 export default function InvoicesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [invoiceType, setInvoiceType] = useState('');
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -15,8 +18,26 @@ export default function InvoicesPage() {
     { value: 'performa', label: 'Performa Invoice' },
   ];
 
+  // Initialize invoice type from URL params on mount
+  useEffect(() => {
+    const typeFromUrl = searchParams.get('type');
+    if (typeFromUrl && (typeFromUrl === 'draft' || typeFromUrl === 'performa')) {
+      setInvoiceType(typeFromUrl);
+    }
+  }, [searchParams]);
+
   const handleInvoiceTypeChange = (e) => {
-    setInvoiceType(e.target.value);
+    const selectedValue = e.target.value || '';
+    setInvoiceType(selectedValue);
+    
+    // Update URL with selected invoice type
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedValue && (selectedValue === 'draft' || selectedValue === 'performa')) {
+      params.set('type', selectedValue);
+    } else {
+      params.delete('type');
+    }
+    router.replace(`?${params.toString()}`, { scroll: false });
   };
 
   // Fetch invoices when invoice type changes
@@ -69,6 +90,11 @@ export default function InvoicesPage() {
     }).format(parseFloat(amount));
   };
 
+  // Handle view invoice
+  const handleViewInvoice = (invoiceId) => {
+    router.push(`/dashboard/invoice/invoices/view/${invoiceId}`);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-1">
       <div className="mx-auto">
@@ -109,6 +135,9 @@ export default function InvoicesPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        View
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         {invoiceType === 'draft' ? 'Draft ID' : 'Performa ID'}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -131,6 +160,34 @@ export default function InvoicesPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {invoices.map((invoice) => (
                       <tr key={invoice.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <button
+                            onClick={() => handleViewInvoice(invoice.id)}
+                            className="text-blue-600 hover:text-blue-800 transition-colors"
+                            title="View Invoice"
+                          >
+                            <svg
+                              className="w-5 h-5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                              />
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                              />
+                            </svg>
+                          </button>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                           {invoiceType === 'draft' ? invoice.draft_view_id || '-' : invoice.performa_view_id || '-'}
                         </td>
@@ -142,7 +199,7 @@ export default function InvoicesPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {invoice.invoice_type || '-'}
-                        </td>
+                        </td> 
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDateDDMMYYYY(invoice.created_at)}
                         </td>

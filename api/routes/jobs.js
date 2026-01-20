@@ -205,12 +205,18 @@ router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   }
 });
 
-// Helper function to parse date
+// Helper function to parse date and return as Date object (with time component)
 const parseDate = (dateValue) => {
   if (!dateValue) return null;
-  if (dateValue instanceof Date) return dateValue;
-  const parsed = new Date(dateValue);
-  return isNaN(parsed.getTime()) ? null : parsed;
+  let date;
+  if (dateValue instanceof Date) {
+    date = dateValue;
+  } else {
+    date = new Date(dateValue);
+  }
+  if (isNaN(date.getTime())) return null;
+  // Return Date object with time component (stored as DATETIME in database)
+  return date;
 };
 
 // Create new job with service charges - Only Super Admin and Admin can create
@@ -239,120 +245,200 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       }
     }
 
-    // Use transaction to ensure atomicity - all operations use transaction client
+    // Validate invoice_type enum value if provided
+    if (jobData.invoice_type && !['full_invoice', 'partial_invoice'].includes(jobData.invoice_type)) {
+      return res.status(400).json({ 
+        error: `Invalid invoice_type value: ${jobData.invoice_type}. Must be 'full_invoice' or 'partial_invoice'` 
+      });
+    }
+    
+    // Validate billing_type enum value if provided
+    if (jobData.billing_type && !['Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'].includes(jobData.billing_type)) {
+      return res.status(400).json({ 
+        error: `Invalid billing_type value: ${jobData.billing_type}. Must be one of: 'Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'` 
+      });
+    }
+
+    // Prepare job data - only include valid Job columns
+    const jobCreateData = {
+      job_register_id: jobData.job_register_id ? parseInt(jobData.job_register_id) : null,
+      job_no: jobData.job_no || null,
+      job_register_field_id: jobData.job_register_field_id ? parseInt(jobData.job_register_field_id) : null,
+      client_info_id: jobData.client_info_id ? parseInt(jobData.client_info_id) : null,
+      client_bu_id: jobData.client_bu_id ? parseInt(jobData.client_bu_id) : null,
+      job_owner_id: jobData.job_owner_id || null,
+      processor_id: jobData.processor_id || null,
+      job_date: parseDate(jobData.job_date),
+      remark: jobData.remark || null,
+      status: jobData.status || null,
+      invoice_type: jobData.invoice_type || null,
+      billing_type: jobData.billing_type || null,
+      form_field_json_data: jobData.form_field_json_data ? (typeof jobData.form_field_json_data === 'string' ? jobData.form_field_json_data : JSON.stringify(jobData.form_field_json_data)) : null,
+      job_id_status: jobData.job_id_status || 'Active',
+      added_by: req.user.id ? parseInt(req.user.id) : null,
+    };
+
+    // Use transaction to ensure atomicity - create job and service charges together
     const result = await prisma.$transaction(async (tx) => {
-      // Prepare job data with proper parsing
-      const jobCreateData = {
-        job_register_id: jobData.job_register_id ? parseInt(jobData.job_register_id) : null,
-        job_no: jobData.job_no || null,
-        job_register_field_id: jobData.job_register_field_id ? parseInt(jobData.job_register_field_id) : null,
-        client_info_id: jobData.client_info_id ? parseInt(jobData.client_info_id) : null,
-        client_bu_id: jobData.client_bu_id ? parseInt(jobData.client_bu_id) : null,
-        type_of_unit: jobData.type_of_unit || null,
-        job_owner: jobData.job_owner || null,
-        job_owner_email_id: jobData.job_owner_email_id || null,
-        job_owner_phone_no: jobData.job_owner_phone_no ? parseFloat(jobData.job_owner_phone_no) : null,
-        processor: jobData.processor || null,
-        processor_email_id: jobData.processor_email_id || null,
-        processor_phone_no: jobData.processor_phone_no ? parseFloat(jobData.processor_phone_no) : null,
-        port: jobData.port || null,
-        claim_no: jobData.claim_no || null,
-        po_no: jobData.po_no || null,
-        quantity: jobData.quantity || null,
-        description_of_quantity: jobData.description_of_quantity || null,
-        job_date: parseDate(jobData.job_date),
-        application_target_date: parseDate(jobData.application_target_date),
-        application_date: parseDate(jobData.application_date),
-        application: jobData.application || null,
-        claim_amount_after_finalization: jobData.claim_amount_after_finalization || null,
-        appl_fee_duty_paid: jobData.appl_fee_duty_paid || null,
-        appl_fees_reference_no: jobData.appl_fees_reference_no || null,
-        app_fees_payt_date: parseDate(jobData.app_fees_payt_date),
-        eft_attachment: jobData.eft_attachment || null,
-        bank_name: jobData.bank_name || null,
-        application_ref_no: jobData.application_ref_no || null,
-        application_ref_date: parseDate(jobData.application_ref_date),
-        cac: parseDate(jobData.cac),
-        cac_attachment: jobData.cac_attachment || null,
-        cec: parseDate(jobData.cec),
-        cec_attachment: jobData.cec_attachment || null,
-        no_of_cac: jobData.no_of_cac || null,
-        no_of_cec: jobData.no_of_cec || null,
-        submission_target_date: parseDate(jobData.submission_target_date),
-        submission_date: parseDate(jobData.submission_date),
-        acknowlegment: jobData.acknowlegment || null,
-        submitted_to: jobData.submitted_to || null,
-        file_no: jobData.file_no || null,
-        file_date: parseDate(jobData.file_date),
-        job_verification_target_date: parseDate(jobData.job_verification_target_date),
-        job_verification_date: parseDate(jobData.job_verification_date),
-        sanction_approval_target_date: parseDate(jobData.sanction_approval_target_date),
-        sanction___approval_date: parseDate(jobData.sanction___approval_date),
-        authorisation_no: jobData.authorisation_no || null,
-        duty_credit_scrip_no: jobData.duty_credit_scrip_no || null,
-        license_no: jobData.license_no || null,
-        certificate_no: jobData.certificate_no || null,
-        refund_sanction_order_no: jobData.refund_sanction_order_no || null,
-        brand_rate_letter_no: jobData.brand_rate_letter_no || null,
-        lic_scrip_order_cert_amendment_no: jobData.lic_scrip_order_cert_amendment_no || null,
-        date: jobData.date || null,
-        refund_order_license_approval_brl_certificate_attachment: jobData.refund_order_license_approval_brl_certificate_attachment || null,
-        duty_credit_refund_sanctioned_exempted_amount: jobData.duty_credit_refund_sanctioned_exempted_amount || null,
-        license_registration_target_date: parseDate(jobData.license_registration_target_date),
-        license_registration_date: parseDate(jobData.license_registration_date),
-        import_date: parseDate(jobData.import_date),
-        actual_duty_credit_refund_sanctioned_amount: jobData.actual_duty_credit_refund_sanctioned_amount || null,
-        normal_retro: jobData.normal_retro || null,
-        cus_clearance: jobData.cus_clearance || null,
-        type_of_ims: jobData.type_of_ims || null,
-        bis: jobData.bis || null,
-        ims: jobData.ims || null,
-        scomet: jobData.scomet || null,
-        inv_no: jobData.inv_no || null,
-        inv_date: parseDate(jobData.inv_date),
-        dbk_claim_no: jobData.dbk_claim_no || null,
-        dbk_claim_date: parseDate(jobData.dbk_claim_date),
-        ref__no: jobData.ref__no || null,
-        ref__date: parseDate(jobData.ref__date),
-        remark: jobData.remark || null,
-        status: jobData.status || null,
-        invoice_type: jobData.invoice_type || null,
-        billing_type: jobData.billing_type || null,
-        form_field_json_data: jobData.form_field_json_data ? (typeof jobData.form_field_json_data === 'string' ? jobData.form_field_json_data : JSON.stringify(jobData.form_field_json_data)) : null,
-        job_id_status: jobData.job_id_status || 'Active',
-        added_by: req.user.id ? parseInt(req.user.id) : null,
-      };
+      // Create job using Job model (which handles JobFieldValue creation internally)
+      // Note: Job.create() uses its own transaction, so we need to use Prisma directly here
+      // But we'll handle JobFieldValue creation manually in the transaction
       
-      // Debug: Log invoice_type value
-      console.log('Invoice Type received in API:', jobData.invoice_type, 'Final value:', jobCreateData.invoice_type);
-      
-      // Validate invoice_type enum value if provided
-      if (jobCreateData.invoice_type && !['full_invoice', 'partial_invoice'].includes(jobCreateData.invoice_type)) {
-        return res.status(400).json({ 
-          error: `Invalid invoice_type value: ${jobCreateData.invoice_type}. Must be 'full_invoice' or 'partial_invoice'` 
-        });
-      }
-      
-      // Validate billing_type enum value if provided
-      if (jobCreateData.billing_type && !['Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'].includes(jobCreateData.billing_type)) {
-        return res.status(400).json({ 
-          error: `Invalid billing_type value: ${jobCreateData.billing_type}. Must be one of: 'Reimbursement', 'Service_Reimbursement', 'Service', 'Service_Reimbursement_Split'` 
+      // First, fetch JobRegisterField if needed
+      let jobRegisterField = null;
+      if (jobCreateData.job_register_field_id) {
+        jobRegisterField = await tx.jobRegisterField.findUnique({
+          where: { id: jobCreateData.job_register_field_id },
         });
       }
 
-      // Create job using transaction client
+      // Create the job
       const job = await tx.job.create({
-        data: jobCreateData,
-        include: {
-          jobRegister: {
-            select: {
-              id: true,
-              job_title: true,
-              job_code: true,
-            },
-          },
+        data: {
+          job_register_id: jobCreateData.job_register_id,
+          job_no: jobCreateData.job_no,
+          job_register_field_id: jobCreateData.job_register_field_id,
+          client_info_id: jobCreateData.client_info_id,
+          client_bu_id: jobCreateData.client_bu_id,
+          job_owner_id: jobCreateData.job_owner_id,
+          processor_id: jobCreateData.processor_id,
+          job_date: jobCreateData.job_date,
+          remark: jobCreateData.remark,
+          status: jobCreateData.status,
+          invoice_type: jobCreateData.invoice_type,
+          billing_type: jobCreateData.billing_type,
+          form_field_json_data: jobCreateData.form_field_json_data,
+          job_id_status: jobCreateData.job_id_status,
+          added_by: jobCreateData.added_by,
         },
       });
+
+      // Extract and store form field values in JobFieldValue table
+      const JobFieldValue = require('../models/JobFieldValue');
+      const JobModel = require('../models/Job');
+      const fieldValues = {};
+
+      // Helper function to convert field name to database column name (same as JobModel.getFieldKey)
+      const getFieldKey = (fieldName) => {
+        if (!fieldName || typeof fieldName !== 'string') return null;
+        return fieldName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      };
+
+      // Handle _dynamic fields from jobData
+      const dynamicFields = {};
+      Object.keys(jobData).forEach(key => {
+        if (key.endsWith('_dynamic')) {
+          // Remove _dynamic suffix and store the original field name
+          const originalFieldName = key.slice(0, -8); // Remove '_dynamic' (8 characters)
+          const value = jobData[key];
+          // Only include non-empty values
+          if (value !== '' && value !== null && value !== undefined) {
+            dynamicFields[originalFieldName] = value;
+          }
+        }
+      });
+
+      console.log('Dynamic fields extracted in route:', dynamicFields);
+
+      // Map dynamic fields to their original field names from form_fields_json
+      if (Object.keys(dynamicFields).length > 0 && jobRegisterField) {
+        // Parse form_fields_json to get field names
+        let formFields = jobRegisterField.form_fields_json;
+        if (typeof formFields === 'string') {
+          try {
+            formFields = JSON.parse(formFields);
+          } catch (error) {
+            console.error('Error parsing form_fields_json:', error);
+            formFields = [];
+          }
+        }
+
+        console.log('Form fields from jobRegisterField:', formFields);
+
+        // Create a map of field keys to field names
+        const fieldKeyToNameMap = {};
+        if (Array.isArray(formFields)) {
+          formFields.forEach((field) => {
+            if (field.name) {
+              const fieldKey = getFieldKey(field.name);
+              if (fieldKey) {
+                fieldKeyToNameMap[fieldKey] = field.name;
+              }
+            }
+          });
+        }
+
+        console.log('Field key to name map:', fieldKeyToNameMap);
+
+        // Map dynamic fields to their original field names
+        Object.keys(dynamicFields).forEach(fieldKey => {
+          const fieldName = fieldKeyToNameMap[fieldKey] || fieldKey;
+          let value = dynamicFields[fieldKey];
+          
+          // Convert value to string for storage
+          if (value instanceof Date) {
+            value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+          } else {
+            value = String(value);
+          }
+          
+          fieldValues[fieldName] = value;
+        });
+      } else if (Object.keys(dynamicFields).length > 0) {
+        // If jobRegisterField is not available, use field keys directly as field names
+        console.log('JobRegisterField not available, using field keys directly');
+        Object.keys(dynamicFields).forEach(fieldKey => {
+          let value = dynamicFields[fieldKey];
+          
+          // Convert value to string for storage
+          if (value instanceof Date) {
+            value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+          } else {
+            value = String(value);
+          }
+          
+          fieldValues[fieldKey] = value;
+        });
+      }
+
+      // Also handle form_field_json_data if provided (for backward compatibility)
+      if (jobRegisterField && jobCreateData.form_field_json_data) {
+        // Parse form_field_json_data if it's a string
+        let formData = jobCreateData.form_field_json_data;
+        if (typeof formData === 'string') {
+          try {
+            formData = JSON.parse(formData);
+          } catch (error) {
+            console.error('Error parsing form_field_json_data:', error);
+            formData = {};
+          }
+        }
+
+        // Extract field values using the helper method
+        const formFieldValues = JobModel.extractFormFieldValues(formData, jobRegisterField);
+        
+        // Merge with dynamic field values (form_field_json_data takes precedence if duplicate)
+        Object.assign(fieldValues, formFieldValues);
+      }
+
+      console.log('Final field values to save:', fieldValues);
+
+      // Store field values in JobFieldValue table
+      if (Object.keys(fieldValues).length > 0) {
+        const fieldValueData = Object.keys(fieldValues).map((fieldName) => ({
+          job_id: job.id,
+          field_name: fieldName,
+          field_value: fieldValues[fieldName] || null,
+        }));
+
+        await tx.jobFieldValue.createMany({
+          data: fieldValueData,
+          skipDuplicates: true,
+        });
+        console.log('JobFieldValue saved successfully for job:', job.id);
+      } else {
+        console.log('No field values to save');
+      }
 
       // Create job service charges if provided
       if (job_service_charges && Array.isArray(job_service_charges) && job_service_charges.length > 0) {
@@ -413,7 +499,7 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
         }
       }
 
-      // Fetch complete job with service charges using transaction client
+      // Fetch complete job with service charges and field values
       const completeJob = await tx.job.findUnique({
         where: { id: job.id },
         include: {
@@ -426,6 +512,9 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
           },
           jobServiceCharges: {
             where: { status: { not: 'Delete' } },
+          },
+          jobFieldValues: {
+            orderBy: { field_name: 'asc' },
           },
         },
       });
@@ -475,6 +564,11 @@ router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
     const existingJob = await Job.findById(id);
     if (!existingJob) {
       return res.status(404).json({ error: 'Job not found' });
+    }
+
+    // Parse job_date if provided
+    if (jobData.job_date !== undefined) {
+      jobData.job_date = parseDate(jobData.job_date);
     }
 
     // Update job data

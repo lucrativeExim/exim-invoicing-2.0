@@ -25,12 +25,30 @@ export default function EditJobPage() {
 
       try {
         setLoading(true);
+        // Fetch job data - API includes jobFieldValues from job_field_values database table
         const response = await api.get(`/jobs/${jobId}`);
-        setJobData(response.data);
+        let jobData = response.data;
+        
+        // Ensure jobFieldValues is always an array (from job_field_values database table)
+        // The API should include jobFieldValues with field_name and field_value from the database
+        if (!jobData.jobFieldValues || !Array.isArray(jobData.jobFieldValues)) {
+          jobData.jobFieldValues = [];
+        }
+        
+        // Log field values for debugging - shows values fetched from job_field_values table
+        if (jobData.jobFieldValues && jobData.jobFieldValues.length > 0) {
+          console.log(`Loaded ${jobData.jobFieldValues.length} field values from job_field_values table for job ${jobId}:`, 
+            jobData.jobFieldValues.map(fv => ({ field_name: fv.field_name, field_value: fv.field_value }))
+          );
+        } else {
+          console.log(`No field values found in job_field_values table for job ${jobId}`);
+        }
+        
+        setJobData(jobData);
         
         // Set page title with job_no if available
-        if (response.data?.job_no) {
-          setPageTitle(`Edit Job - ${response.data.job_no}`);
+        if (jobData?.job_no) {
+          setPageTitle(`Edit Job - ${jobData.job_no}`);
         } else {
           setPageTitle('Edit Job');
         }

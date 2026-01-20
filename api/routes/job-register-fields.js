@@ -11,16 +11,33 @@ router.use(authenticate);
 router.get('/job-register/:jobRegisterId/active', async (req, res) => {
   try {
     const { jobRegisterId } = req.params;
+    console.log(`[job-register-fields] GET /job-register/${jobRegisterId}/active - Fetching active field for job register ID: ${jobRegisterId}`);
+    
+    if (!jobRegisterId) {
+      console.log(`[job-register-fields] Missing jobRegisterId parameter`);
+      return res.status(400).json({ error: 'Job register ID is required' });
+    }
+    
     const jobRegisterField = await JobRegisterField.findActiveByJobRegisterId(jobRegisterId);
     
     if (!jobRegisterField) {
-      return res.status(404).json({ error: 'Active job register field not found' });
+      console.log(`[job-register-fields] No active field found for job register ID: ${jobRegisterId} - Returning empty result`);
+      // Return empty object with null form_fields_json instead of 404 to allow frontend to handle gracefully
+      // This matches the expected structure so frontend code checking fieldsData.form_fields_json will work
+      return res.json({ 
+        id: null,
+        job_register_id: parseInt(jobRegisterId),
+        form_fields_json: null,
+        status: null
+      });
     }
     
+    console.log(`[job-register-fields] Found active field ID: ${jobRegisterField.id} for job register ID: ${jobRegisterId}`);
     res.json(jobRegisterField);
   } catch (error) {
-    console.error('Error fetching active job register field:', error);
-    res.status(500).json({ error: 'Failed to fetch active job register field' });
+    console.error('[job-register-fields] Error fetching active job register field:', error);
+    console.error('[job-register-fields] Error stack:', error.stack);
+    res.status(500).json({ error: 'Failed to fetch active job register field', details: error.message });
   }
 });
 

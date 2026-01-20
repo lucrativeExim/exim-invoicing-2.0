@@ -85,6 +85,91 @@ class InvoiceModel {
 
     return draftViewId;
   }
+
+  /**
+   * Generate performa_view_id in format: P{account_id}{year_pair}{sequence}
+   * Format: P + account_id + (last_2_digits_of_current_year + last_2_digits_of_next_year) + 4-digit sequence
+   * Year pair updates on April 1st each year
+   * Sequence resets to 0001 on April 1st for each account
+   * 
+   * Examples:
+   * - P225260001 (Account 2, year 2526 (2025-2026), sequence 0001)
+   * - P226270001 (Account 2, year 2627 (2026-2027), sequence 0001)
+   * - P124250001 (Account 1, year 2425 (2024-2025), sequence 0001)
+   */
+  async generatePerformaViewId(accountId) {
+    if (!accountId) {
+      throw new Error('account_id is required to generate performa_view_id');
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
+
+    // Year pair: If month >= April (4), use current year + next year
+    // Otherwise, use previous year + current year
+    // Use only last 2 digits of each year (e.g., 2025 -> 25, 2026 -> 26)
+    let yearPair;
+    if (currentMonth >= 4) {
+      // April onwards: use current year + next year (e.g., 2025 -> 2526)
+      const currentYearLastTwo = String(currentYear).slice(-2);
+      const nextYearLastTwo = String(currentYear + 1).slice(-2);
+      yearPair = `${currentYearLastTwo}${nextYearLastTwo}`;
+    } else {
+      // January-March: use previous year + current year (e.g., 2025 -> 2425)
+      const prevYearLastTwo = String(currentYear - 1).slice(-2);
+      const currentYearLastTwo = String(currentYear).slice(-2);
+      yearPair = `${prevYearLastTwo}${currentYearLastTwo}`;
+    }
+
+    // Find the highest sequence number for this account and year pair
+    // Look for invoices with performa_view_id matching pattern: P{account_id}{year_pair}*
+    const pattern = `P${accountId}${yearPair}`;
+    
+    // Query invoices with performa_view_id that might match the pattern
+    // We'll filter in JavaScript to ensure we get exact matches
+    const existingInvoices = await prisma.invoice.findMany({
+      where: {
+        performa_view_id: {
+          not: null,
+        },
+        invoice_status: {
+          not: 'Delete',
+        },
+      },
+      select: {
+        performa_view_id: true,
+      },
+    });
+
+    // Filter invoices that match the pattern (P + account_id + year_pair)
+    const matchingInvoices = existingInvoices.filter((invoice) => {
+      return invoice.performa_view_id && invoice.performa_view_id.startsWith(pattern);
+    });
+
+    // Extract sequence numbers and find the maximum
+    let maxSequence = 0;
+    matchingInvoices.forEach((invoice) => {
+      if (invoice.performa_view_id) {
+        // Extract the last 4 digits (sequence)
+        const sequenceStr = invoice.performa_view_id.slice(-4);
+        const sequence = parseInt(sequenceStr, 10);
+        if (!isNaN(sequence) && sequence > maxSequence) {
+          maxSequence = sequence;
+        }
+      }
+    });
+
+    // Next sequence number
+    const nextSequence = maxSequence + 1;
+    const sequenceStr = String(nextSequence).padStart(4, '0');
+
+    // Generate performa_view_id: P + account_id + year_pair + sequence
+    const performaViewId = `P${accountId}${yearPair}${sequenceStr}`;
+
+    return performaViewId;
+  }
+
   /**
    * Get all invoices
    */
@@ -98,10 +183,22 @@ class InvoiceModel {
     return await prisma.invoice.findMany({
       where,
       include: {
-        jobRegister: true,
+        jobRegister: {
+          include: {
+            gstRate: true,
+          },
+        },
         invoiceSelectedJobs: {
           include: {
-            job: true,
+            job: {
+              include: {
+                jobFieldValues: {
+                  orderBy: { field_name: 'asc' },
+                },
+                clientInfo: true,
+                clientBu: true,
+              },
+            },
           },
         },
       },
@@ -125,10 +222,22 @@ class InvoiceModel {
     return await prisma.invoice.findUnique({
       where,
       include: {
-        jobRegister: true,
+        jobRegister: {
+          include: {
+            gstRate: true,
+          },
+        },
         invoiceSelectedJobs: {
           include: {
-            job: true,
+            job: {
+              include: {
+                jobFieldValues: {
+                  orderBy: { field_name: 'asc' },
+                },
+                clientInfo: true,
+                clientBu: true,
+              },
+            },
           },
         },
       },
@@ -348,37 +457,98 @@ class InvoiceModel {
       status,
       invoice_status,
       invoice_stage_status,
+      performa_created_by,
     } = data;
+
+    // If shifting to Proforma, generate performa_view_id
+    let performaViewId = null;
+    if (invoice_stage_status === 'Performa') {
+      // First, fetch the invoice to get account_id from jobs
+      const existingInvoice = await prisma.invoice.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          invoiceSelectedJobs: {
+            include: {
+              job: {
+                include: {
+                  clientInfo: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (existingInvoice) {
+        // Get account_id from first job's clientInfo
+        let accountId = null;
+        if (existingInvoice.invoiceSelectedJobs && existingInvoice.invoiceSelectedJobs.length > 0) {
+          const firstJob = existingInvoice.invoiceSelectedJobs[0].job;
+          if (firstJob && firstJob.clientInfo && firstJob.clientInfo.account_id) {
+            accountId = firstJob.clientInfo.account_id;
+          }
+        }
+
+        // Only generate performa_view_id if account_id is found and performa_view_id doesn't exist
+        if (accountId && !existingInvoice.performa_view_id) {
+          try {
+            performaViewId = await this.generatePerformaViewId(parseInt(accountId));
+            console.log(`Generated performa_view_id: ${performaViewId} for account_id: ${accountId}`);
+          } catch (error) {
+            console.error('Error generating performa_view_id:', error);
+            // Continue without performa_view_id if generation fails
+          }
+        } else if (existingInvoice.performa_view_id) {
+          // If performa_view_id already exists, keep it
+          performaViewId = existingInvoice.performa_view_id;
+        }
+      }
+    }
+
+    // Build update data
+    const updateData = {
+      ...(billing_type !== undefined && { billing_type }),
+      ...(invoice_type !== undefined && { invoice_type }),
+      ...(pay_amount !== undefined && { pay_amount }),
+      ...(amount !== undefined && { amount }),
+      ...(professional_charges !== undefined && { professional_charges: parseFloat(professional_charges) }),
+      ...(registration_other_charges !== undefined && { registration_other_charges: parseFloat(registration_other_charges) }),
+      ...(ca_charges !== undefined && { ca_charges: parseFloat(ca_charges) }),
+      ...(ce_charges !== undefined && { ce_charges: parseFloat(ce_charges) }),
+      ...(ca_cert_count !== undefined && { ca_cert_count: ca_cert_count ? parseInt(ca_cert_count) : null }),
+      ...(ce_cert_count !== undefined && { ce_cert_count: ce_cert_count ? parseInt(ce_cert_count) : null }),
+      ...(application_fees !== undefined && { application_fees: parseFloat(application_fees) }),
+      ...(remi_one_charges !== undefined && { remi_one_charges: parseFloat(remi_one_charges) }),
+      ...(remi_two_charges !== undefined && { remi_two_charges: parseFloat(remi_two_charges) }),
+      ...(remi_three_charges !== undefined && { remi_three_charges: parseFloat(remi_three_charges) }),
+      ...(remi_four_charges !== undefined && { remi_four_charges: parseFloat(remi_four_charges) }),
+      ...(remi_five_charges !== undefined && { remi_five_charges }),
+      ...(reward_penalty_input !== undefined && { reward_penalty_input }),
+      ...(reward_penalty_amount !== undefined && { reward_penalty_amount: parseFloat(reward_penalty_amount) }),
+      ...(note !== undefined && { note }),
+      ...(po_no !== undefined && { po_no }),
+      ...(irn_no !== undefined && { irn_no }),
+      ...(status !== undefined && { status }),
+      ...(invoice_status !== undefined && { invoice_status }),
+      ...(invoice_stage_status !== undefined && { invoice_stage_status }),
+    };
+
+    // Add performa_view_id if generated
+    if (performaViewId !== null) {
+      updateData.performa_view_id = performaViewId;
+    }
+
+    // Set performa_created_at and performa_created_by when shifting to Proforma
+    if (invoice_stage_status === 'Performa') {
+      updateData.performa_created_at = getISTDateTime();
+      if (performa_created_by !== undefined) {
+        updateData.performa_created_by = performa_created_by ? parseInt(performa_created_by) : null;
+      }
+    }
 
     return await prisma.invoice.update({
       where: { id: parseInt(id) },
-      data: {
-        ...(billing_type !== undefined && { billing_type }),
-        ...(invoice_type !== undefined && { invoice_type }),
-        ...(pay_amount !== undefined && { pay_amount }),
-        ...(amount !== undefined && { amount }),
-        ...(professional_charges !== undefined && { professional_charges: parseFloat(professional_charges) }),
-        ...(registration_other_charges !== undefined && { registration_other_charges: parseFloat(registration_other_charges) }),
-        ...(ca_charges !== undefined && { ca_charges: parseFloat(ca_charges) }),
-        ...(ce_charges !== undefined && { ce_charges: parseFloat(ce_charges) }),
-        ...(ca_cert_count !== undefined && { ca_cert_count: ca_cert_count ? parseInt(ca_cert_count) : null }),
-        ...(ce_cert_count !== undefined && { ce_cert_count: ce_cert_count ? parseInt(ce_cert_count) : null }),
-        ...(application_fees !== undefined && { application_fees: parseFloat(application_fees) }),
-        ...(remi_one_charges !== undefined && { remi_one_charges: parseFloat(remi_one_charges) }),
-        ...(remi_two_charges !== undefined && { remi_two_charges: parseFloat(remi_two_charges) }),
-        ...(remi_three_charges !== undefined && { remi_three_charges: parseFloat(remi_three_charges) }),
-        ...(remi_four_charges !== undefined && { remi_four_charges: parseFloat(remi_four_charges) }),
-        ...(remi_five_charges !== undefined && { remi_five_charges }),
-        ...(reward_penalty_input !== undefined && { reward_penalty_input }),
-        ...(reward_penalty_amount !== undefined && { reward_penalty_amount: parseFloat(reward_penalty_amount) }),
-        ...(note !== undefined && { note }),
-        ...(po_no !== undefined && { po_no }),
-        ...(irn_no !== undefined && { irn_no }),
-        ...(status !== undefined && { status }),
-        ...(invoice_status !== undefined && { invoice_status }),
-        ...(invoice_stage_status !== undefined && { invoice_stage_status }),
-        updated_at: new Date(),
-      },
+      data: updateData,
       include: {
         jobRegister: true,
         invoiceSelectedJobs: {

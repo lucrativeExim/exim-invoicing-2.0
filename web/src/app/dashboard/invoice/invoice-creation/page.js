@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment, useRef } from "react";
 import Image from "next/image";
 import { SelectBox } from "@/components/formComponents";
 import api from "@/services/api";
@@ -9,7 +9,59 @@ import logoImage from "@/assets/images/invoice-logo.png";
 
 // Helper function to convert field name to database column name
 const getFieldKey = (fieldName) => {
-  return fieldName.toLowerCase().replace(/\//g, '_').replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return fieldName
+    .toLowerCase()
+    .replace(/\//g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+};
+
+// Helper function to get field value from JobFieldValue table
+// Supports multiple field name variations (case-insensitive, with/without underscores/spaces)
+const getFieldValueFromJobFieldValue = (
+  jobId,
+  fieldName,
+  jobFieldValuesMap
+) => {
+  if (!jobId || !fieldName || !jobFieldValuesMap[jobId]) {
+    return null;
+  }
+
+  const fieldMap = jobFieldValuesMap[jobId];
+
+  // Try exact match first
+  if (fieldMap[fieldName]) {
+    return fieldMap[fieldName];
+  }
+
+  // Try case-insensitive match
+  const lowerFieldName = fieldName.toLowerCase();
+  for (const key in fieldMap) {
+    if (key.toLowerCase() === lowerFieldName) {
+      return fieldMap[key];
+    }
+  }
+
+  // Try variations: replace underscores with spaces and vice versa
+  const variations = [
+    fieldName.replace(/_/g, " "),
+    fieldName.replace(/\s+/g, "_"),
+    fieldName.replace(/_/g, "").toLowerCase(),
+  ];
+
+  for (const variation of variations) {
+    if (fieldMap[variation]) {
+      return fieldMap[variation];
+    }
+    // Case-insensitive match for variations
+    for (const key in fieldMap) {
+      if (key.toLowerCase() === variation.toLowerCase()) {
+        return fieldMap[key];
+      }
+    }
+  }
+
+  return null;
 };
 
 export default function InvoiceCreationPage() {
@@ -32,9 +84,23 @@ export default function InvoiceCreationPage() {
   const [selectedClientServiceCharge, setSelectedClientServiceCharge] =
     useState(null);
   const [jobServiceChargesMap, setJobServiceChargesMap] = useState({}); // Map of job_id -> job_service_charge
+  const [jobFieldValuesMap, setJobFieldValuesMap] = useState({}); // Map of job_id -> { field_name: field_value }
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSampleInvoice, setShowSampleInvoice] = useState(false);
+  const [showPartialInvoiceModal, setShowPartialInvoiceModal] = useState(false);
   const [logoError, setLogoError] = useState(false);
+  const [partialInvoiceBreakdown, setPartialInvoiceBreakdown] = useState({
+    professionalCharges: { openingAmt: 0, payAmt: 0 },
+    registrationCharges: { openingAmt: 0, payAmt: 0 },
+    caCert: { openingAmt: 0, payAmt: 0 },
+    ceCert: { openingAmt: 0, payAmt: 0 },
+    applicationFees: { openingAmt: 0, payAmt: 0 },
+    remiOne: { openingAmt: 0, payAmt: 0 },
+    remiTwo: { openingAmt: 0, payAmt: 0 },
+    remiThree: { openingAmt: 0, payAmt: 0 },
+    remiFour: { openingAmt: 0, payAmt: 0 },
+    remiFive: { openingAmt: 0, payAmt: 0 },
+  });
   const [invoiceCalculation, setInvoiceCalculation] = useState({
     quantity: "",
     amount: "",
@@ -44,6 +110,27 @@ export default function InvoiceCreationPage() {
     rewardDiscountAmount: "",
   });
   const [billingFieldNames, setBillingFieldNames] = useState([]);
+  const [rewardDiscountErrors, setRewardDiscountErrors] = useState({
+    percent: "",
+    amount: "",
+  });
+  const rewardDiscountAmountInputRef = useRef(null);
+  const isTypingRewardDiscountRef = useRef(false);
+  const isPrintingRef = useRef(false);
+  const [excludedJobIds, setExcludedJobIds] = useState([]); // Jobs with active, non-canceled invoices
+
+  // Lock body scroll when Invoice Calculation Modal or Sample Invoice modal is open
+  useEffect(() => {
+    if (showInvoiceModal || showSampleInvoice || showPartialInvoiceModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [showInvoiceModal, showSampleInvoice, showPartialInvoiceModal]);
 
   // Fetch job codes on mount
   useEffect(() => {
@@ -72,6 +159,7 @@ export default function InvoiceCreationPage() {
       }
 
       try {
+        console.log(`[fetchBillingFieldNames] Fetching fields for job register ID: ${selectedJobCode}`);
         const response = await api.get(
           `/job-register-fields/job-register/${selectedJobCode}/active`
         );
@@ -97,6 +185,19 @@ export default function InvoiceCreationPage() {
         }
       } catch (error) {
         console.error("Error fetching billing field names:", error);
+        console.error("Error details:", {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          url: error.config?.url,
+          selectedJobCode: selectedJobCode
+        });
+        
+        // If 404, it means no active field exists - this is acceptable, just show empty fields
+        if (error.response?.status === 404) {
+          console.log(`No active job register field found for job register ID: ${selectedJobCode}`);
+        }
+        
         setBillingFieldNames([]);
       }
     };
@@ -336,11 +437,24 @@ export default function InvoiceCreationPage() {
           setJobs(filteredJobs);
           setSelectedJobIds([]); // Clear selections when "All Clients" is selected
           setJobServiceChargesMap({});
+
+          // Build jobFieldValuesMap from jobs data
+          const fieldValuesMap = {};
+          filteredJobs.forEach((job) => {
+            if (job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
+              fieldValuesMap[job.id] = {};
+              job.jobFieldValues.forEach((fv) => {
+                fieldValuesMap[job.id][fv.field_name] = fv.field_value;
+              });
+            }
+          });
+          setJobFieldValuesMap(fieldValuesMap);
         } catch (error) {
           console.error("Error fetching jobs for all clients:", error);
           setJobs([]);
           setSelectedJobIds([]);
           setJobServiceChargesMap({});
+          setJobFieldValuesMap({});
         } finally {
           setJobsLoading(false);
         }
@@ -386,11 +500,24 @@ export default function InvoiceCreationPage() {
         setJobs(filteredJobs);
         setSelectedJobIds([]);
         setJobServiceChargesMap({});
+
+        // Build jobFieldValuesMap from jobs data
+        const fieldValuesMap = {};
+        filteredJobs.forEach((job) => {
+          if (job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
+            fieldValuesMap[job.id] = {};
+            job.jobFieldValues.forEach((fv) => {
+              fieldValuesMap[job.id][fv.field_name] = fv.field_value;
+            });
+          }
+        });
+        setJobFieldValuesMap(fieldValuesMap);
       } catch (error) {
         console.error("Error fetching jobs:", error);
         setJobs([]);
         setSelectedJobIds([]);
         setJobServiceChargesMap({});
+        setJobFieldValuesMap({});
       } finally {
         setJobsLoading(false);
       }
@@ -403,6 +530,170 @@ export default function InvoiceCreationPage() {
     selectedClientServiceCharge,
     sessionAccount,
   ]);
+
+  // Fetch active invoices for selected jobs and calculate Opening Amt
+  useEffect(() => {
+    const fetchActiveInvoicesAndCalculateOpeningAmt = async () => {
+      // Only fetch if we have selected jobs
+      if (selectedJobIds.length === 0) {
+        // Reset opening amounts if no jobs selected
+        setPartialInvoiceBreakdown((prev) => ({
+          professionalCharges: { openingAmt: 0, payAmt: prev.professionalCharges.payAmt },
+          registrationCharges: { openingAmt: 0, payAmt: prev.registrationCharges.payAmt },
+          caCert: { openingAmt: 0, payAmt: prev.caCert.payAmt },
+          ceCert: { openingAmt: 0, payAmt: prev.ceCert.payAmt },
+          applicationFees: { openingAmt: 0, payAmt: prev.applicationFees.payAmt },
+          remiOne: { openingAmt: 0, payAmt: prev.remiOne.payAmt },
+          remiTwo: { openingAmt: 0, payAmt: prev.remiTwo.payAmt },
+          remiThree: { openingAmt: 0, payAmt: prev.remiThree.payAmt },
+          remiFour: { openingAmt: 0, payAmt: prev.remiFour.payAmt },
+          remiFive: { openingAmt: 0, payAmt: prev.remiFive.payAmt },
+        }));
+        return;
+      }
+
+      try {
+        // Fetch all active invoices
+        const response = await api.get('/invoices', {
+          params: {
+            invoice_status: 'Active',
+          },
+        });
+
+        const activeInvoices = response.data || [];
+
+        // Filter invoices that contain any of the selected jobs
+        const relevantInvoices = activeInvoices.filter((invoice) => {
+          if (!invoice.invoiceSelectedJobs || !Array.isArray(invoice.invoiceSelectedJobs)) {
+            return false;
+          }
+          // Check if any of the selected jobs are in this invoice
+          return invoice.invoiceSelectedJobs.some((selectedJob) =>
+            selectedJobIds.includes(selectedJob.job_id)
+          );
+        });
+
+        // Calculate Opening Amt by summing Pay Amt values from all relevant invoices
+        // Opening Amt = sum of Pay Amt from all previous active partial invoices
+        const openingAmt = {
+          professionalCharges: 0,
+          registrationCharges: 0,
+          caCert: 0,
+          ceCert: 0,
+          applicationFees: 0,
+          remiOne: 0,
+          remiTwo: 0,
+          remiThree: 0,
+          remiFour: 0,
+          remiFive: 0,
+        };
+
+        relevantInvoices.forEach((invoice) => {
+          // Sum up Pay Amt values (which represent what was invoiced in partial invoices)
+          // For partial invoices, Pay Amt is what was actually invoiced
+          openingAmt.professionalCharges += parseFloat(invoice.professional_charges || 0);
+          openingAmt.registrationCharges += parseFloat(invoice.registration_other_charges || 0);
+          openingAmt.caCert += parseFloat(invoice.ca_charges || 0);
+          openingAmt.ceCert += parseFloat(invoice.ce_charges || 0);
+          openingAmt.applicationFees += parseFloat(invoice.application_fees || 0);
+          openingAmt.remiOne += parseFloat(invoice.remi_one_charges || 0);
+          openingAmt.remiTwo += parseFloat(invoice.remi_two_charges || 0);
+          openingAmt.remiThree += parseFloat(invoice.remi_three_charges || 0);
+          openingAmt.remiFour += parseFloat(invoice.remi_four_charges || 0);
+          openingAmt.remiFive += parseFloat(invoice.remi_five_charges || 0);
+        });
+
+        // Update partialInvoiceBreakdown with calculated Opening Amt
+        // Preserve existing Pay Amt values
+        setPartialInvoiceBreakdown((prev) => ({
+          professionalCharges: { openingAmt: openingAmt.professionalCharges, payAmt: prev.professionalCharges.payAmt },
+          registrationCharges: { openingAmt: openingAmt.registrationCharges, payAmt: prev.registrationCharges.payAmt },
+          caCert: { openingAmt: openingAmt.caCert, payAmt: prev.caCert.payAmt },
+          ceCert: { openingAmt: openingAmt.ceCert, payAmt: prev.ceCert.payAmt },
+          applicationFees: { openingAmt: openingAmt.applicationFees, payAmt: prev.applicationFees.payAmt },
+          remiOne: { openingAmt: openingAmt.remiOne, payAmt: prev.remiOne.payAmt },
+          remiTwo: { openingAmt: openingAmt.remiTwo, payAmt: prev.remiTwo.payAmt },
+          remiThree: { openingAmt: openingAmt.remiThree, payAmt: prev.remiThree.payAmt },
+          remiFour: { openingAmt: openingAmt.remiFour, payAmt: prev.remiFour.payAmt },
+          remiFive: { openingAmt: openingAmt.remiFive, payAmt: prev.remiFive.payAmt },
+        }));
+      } catch (error) {
+        console.error('Error fetching active invoices for Opening Amt calculation:', error);
+        // On error, reset opening amounts to 0
+        setPartialInvoiceBreakdown((prev) => ({
+          professionalCharges: { openingAmt: 0, payAmt: prev.professionalCharges.payAmt },
+          registrationCharges: { openingAmt: 0, payAmt: prev.registrationCharges.payAmt },
+          caCert: { openingAmt: 0, payAmt: prev.caCert.payAmt },
+          ceCert: { openingAmt: 0, payAmt: prev.ceCert.payAmt },
+          applicationFees: { openingAmt: 0, payAmt: prev.applicationFees.payAmt },
+          remiOne: { openingAmt: 0, payAmt: prev.remiOne.payAmt },
+          remiTwo: { openingAmt: 0, payAmt: prev.remiTwo.payAmt },
+          remiThree: { openingAmt: 0, payAmt: prev.remiThree.payAmt },
+          remiFour: { openingAmt: 0, payAmt: prev.remiFour.payAmt },
+          remiFive: { openingAmt: 0, payAmt: prev.remiFive.payAmt },
+        }));
+      }
+    };
+
+    fetchActiveInvoicesAndCalculateOpeningAmt();
+  }, [selectedJobIds]);
+
+  // Fetch invoices to exclude jobs that have active, non-canceled invoices with matching billing_type
+  useEffect(() => {
+    const fetchExcludedJobs = async () => {
+      if (!selectedJobCode || !billingType || jobs.length === 0) {
+        setExcludedJobIds([]);
+        return;
+      }
+
+      try {
+        // Map billingType to database values
+        const billingTypeMap = {
+          "Service": "Service",
+          "Service & Reimbursement": "Service_Reimbursement",
+          "Reimbursement": "Reimbursement",
+        };
+        const dbBillingType = billingTypeMap[billingType];
+
+        // Fetch invoices with invoice_status = 'Active'
+        const response = await api.get('/invoices', {
+          params: {
+            invoice_status: 'Active',
+          },
+        });
+
+        const activeInvoices = response.data || [];
+
+        // Filter invoices that:
+        // 1. Are not canceled (invoice_stage_status != 'Canceled')
+        // 2. Match the selected billing_type
+        const nonCanceledInvoices = activeInvoices.filter(
+          (invoice) =>
+            invoice.invoice_stage_status !== 'Canceled' &&
+            invoice.billing_type === dbBillingType
+        );
+
+        // Collect all job IDs from these invoices
+        const excludedIds = new Set();
+        nonCanceledInvoices.forEach((invoice) => {
+          if (invoice.invoiceSelectedJobs && Array.isArray(invoice.invoiceSelectedJobs)) {
+            invoice.invoiceSelectedJobs.forEach((selectedJob) => {
+              if (selectedJob.job_id) {
+                excludedIds.add(selectedJob.job_id);
+              }
+            });
+          }
+        });
+
+        setExcludedJobIds(Array.from(excludedIds));
+      } catch (error) {
+        console.error('Error fetching invoices for exclusion:', error);
+        setExcludedJobIds([]);
+      }
+    };
+
+    fetchExcludedJobs();
+  }, [selectedJobCode, billingType, jobs]);
 
   // Handle invoice type change - update billing type based on invoice type
   const handleInvoiceTypeChange = (e) => {
@@ -423,10 +714,10 @@ export default function InvoiceCreationPage() {
   // Helper function to filter jobs by billing_type based on selected billingType
   const filterJobsByBillingType = (jobList) => {
     if (!billingType) return jobList;
-    
+
     return jobList.filter((job) => {
       const jobBillingType = job.billing_type;
-      
+
       switch (billingType) {
         case "Service":
           // Show jobs where billing_type = 'Service' OR 'Service_Reimbursement_Split'
@@ -450,19 +741,24 @@ export default function InvoiceCreationPage() {
   };
 
   // Filter jobs for Full Invoice (Invoice Type = "full_invoice" and Status = "Closed")
+  // Exclude jobs that have active, non-canceled invoices with matching billing_type
   const fullInvoiceJobs = filterJobsByBillingType(
     jobs.filter(
       (job) =>
-        job.invoice_type === "full_invoice" && job.status === "Closed"
+        job.invoice_type === "full_invoice" &&
+        job.status === "Closed" &&
+        !excludedJobIds.includes(job.id)
     )
   );
 
   // Filter jobs for Partial Invoice (Invoice Type = "full_invoice" and Status = "In_process" or "Closed")
+  // Exclude jobs that have active, non-canceled invoices with matching billing_type
   const partialInvoiceJobs = filterJobsByBillingType(
     jobs.filter(
       (job) =>
         job.invoice_type === "full_invoice" &&
-        (job.status === "In_process" || job.status === "Closed")
+        (job.status === "In_process" || job.status === "Closed") &&
+        !excludedJobIds.includes(job.id)
     )
   );
 
@@ -546,8 +842,24 @@ export default function InvoiceCreationPage() {
     }
 
     // Parse values from job and service charge
-    const claimAmount = parseFloat(job.claim_amount_after_finalization || 0);
-    const quantity = parseFloat(job.quantity || 0);
+    // Fetch claim_amount_after_finalization from JobFieldValues table
+    const claimAmountValue =
+      getFieldValueFromJobFieldValue(
+        job.id,
+        "claim_amount_after_finalization",
+        jobFieldValuesMap
+      ) ||
+      getFieldValueFromJobFieldValue(
+        job.id,
+        "Claim Amount after Finalization",
+        jobFieldValuesMap
+      );
+    const claimAmount = parseFloat(claimAmountValue || 0);
+    // Fetch quantity from JobFieldValues table
+    const quantityValue =
+      getFieldValueFromJobFieldValue(job.id, "quantity", jobFieldValuesMap) ||
+      getFieldValueFromJobFieldValue(job.id, "Quantity", jobFieldValuesMap);
+    const quantity = parseFloat(quantityValue || job.quantity || 0);
     const fixed = parseFloat(serviceCharge.fixed || 0);
     const inPercentage = parseFloat(serviceCharge.in_percentage || 0);
     const min = parseFloat(serviceCharge.min || 0);
@@ -669,6 +981,19 @@ export default function InvoiceCreationPage() {
 
               if (activeCharge) {
                 chargesMap[jobId] = activeCharge;
+                // Debug: Log remi fields to verify data structure
+                console.log(`[fetchJobServiceCharges] Job ${jobId} service charge remi fields:`, {
+                  remi_one_desc: activeCharge.remi_one_desc || activeCharge.remiOneDesc,
+                  remi_one_charges: activeCharge.remi_one_charges || activeCharge.remiOneCharges,
+                  remi_two_desc: activeCharge.remi_two_desc || activeCharge.remiTwoDesc,
+                  remi_two_charges: activeCharge.remi_two_charges || activeCharge.remiTwoCharges,
+                  remi_three_desc: activeCharge.remi_three_desc || activeCharge.remiThreeDesc,
+                  remi_three_charges: activeCharge.remi_three_charges || activeCharge.remiThreeCharges,
+                  remi_four_desc: activeCharge.remi_four_desc || activeCharge.remiFourDesc,
+                  remi_four_charges: activeCharge.remi_four_charges || activeCharge.remiFourCharges,
+                  remi_five_desc: activeCharge.remi_five_desc || activeCharge.remiFiveDesc,
+                  remi_five_charges: activeCharge.remi_five_charges || activeCharge.remiFiveCharges,
+                });
               }
             } catch (error) {
               console.error(
@@ -1100,27 +1425,50 @@ export default function InvoiceCreationPage() {
     return result + " Only";
   };
 
-  // Calculate combined application fees from all selected jobs
+  // Calculate combined application fees from all selected jobs - fetch from JobFieldValue table
   // Sum up appl_fee_duty_paid from all selected jobs
+  // Try multiple field name variations: "appl_fee_duty_paid", "Appl Fees Paid", "appl_fees_paid", etc.
   const combinedApplicationFees = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    
-    // Sum up appl_fee_duty_paid from all selected jobs
+
+    // Sum up appl_fee_duty_paid from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
-      if (job && job.appl_fee_duty_paid) {
-        return total + parseFloat(job.appl_fee_duty_paid || 0);
+      const fieldValue =
+        getFieldValueFromJobFieldValue(
+          jobId,
+          "appl_fee_duty_paid",
+          jobFieldValuesMap
+        ) ||
+        getFieldValueFromJobFieldValue(
+          jobId,
+          "Appl Fees Paid",
+          jobFieldValuesMap
+        ) ||
+        getFieldValueFromJobFieldValue(
+          jobId,
+          "appl_fees_paid",
+          jobFieldValuesMap
+        ) ||
+        getFieldValueFromJobFieldValue(
+          jobId,
+          "application_fees",
+          jobFieldValuesMap
+        );
+      if (fieldValue) {
+        return total + parseFloat(fieldValue || 0);
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobs]);
+  }, [selectedJobIds, jobFieldValuesMap]);
 
   // Get selected job code name from job_register table
   // Join with job_register table using job_register_id to fetch job_code
   const selectedJobCodeName = useMemo(() => {
     if (!selectedJobCode) return "NA";
     // Find the job_register record by id (job_register_id)
-    const jobRegister = jobCodes.find((jc) => jc.id.toString() === selectedJobCode.toString());
+    const jobRegister = jobCodes.find(
+      (jc) => jc.id.toString() === selectedJobCode.toString()
+    );
     // Return job_code from job_register table
     return jobRegister?.job_code || "NA";
   }, [jobCodes, selectedJobCode]);
@@ -1129,7 +1477,9 @@ export default function InvoiceCreationPage() {
   const selectedSacNo = useMemo(() => {
     if (!selectedJobCode) return "NA";
     // Find the job_register record by id
-    const jobRegister = jobCodes.find((jc) => jc.id.toString() === selectedJobCode.toString());
+    const jobRegister = jobCodes.find(
+      (jc) => jc.id.toString() === selectedJobCode.toString()
+    );
     // Check if job_register has gstRate relation with sac_no
     // The relationship: job_register.gst_rate_id -> gst_rates.id -> gst_rates.sac_no
     if (jobRegister?.gstRate?.sac_no) {
@@ -1149,7 +1499,9 @@ export default function InvoiceCreationPage() {
       };
     }
     // Find the job_register record by id
-    const jobRegister = jobCodes.find((jc) => jc.id.toString() === selectedJobCode.toString());
+    const jobRegister = jobCodes.find(
+      (jc) => jc.id.toString() === selectedJobCode.toString()
+    );
     // Get GST rates from gstRate relation
     if (jobRegister?.gstRate) {
       return {
@@ -1198,118 +1550,254 @@ export default function InvoiceCreationPage() {
     return null;
   }, [selectedJobIds, jobs]);
 
-  // Calculate combined CA CERT count from all selected jobs
+  // Calculate combined CA CERT count from all selected jobs - fetch from JobFieldValue table
+  // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
   const combinedCaCertCount = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    if (selectedJobIds.length === 1) {
-      return firstSelectedJob?.no_of_cac || 0;
-    }
-    // Sum up no_of_cac from all selected jobs
+    // Sum up CA CERT count from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
-      return total + (parseInt(job?.no_of_cac) || 0);
+      const fieldValue =
+        getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
+      return total + (parseInt(fieldValue) || 0);
     }, 0);
-  }, [selectedJobIds, jobs, firstSelectedJob]);
+  }, [selectedJobIds, jobFieldValuesMap]);
 
-  // Calculate combined CE CERT count from all selected jobs
+  // Calculate combined CE CERT count from all selected jobs - fetch from JobFieldValue table
+  // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
   const combinedCeCertCount = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    if (selectedJobIds.length === 1) {
-      return firstSelectedJob?.no_of_cec || 0;
-    }
-    // Sum up no_of_cec from all selected jobs
+    // Sum up CE CERT count from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
-      return total + (parseInt(job?.no_of_cec) || 0);
+      const fieldValue =
+        getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
+      return total + (parseInt(fieldValue) || 0);
     }, 0);
-  }, [selectedJobIds, jobs, firstSelectedJob]);
+  }, [selectedJobIds, jobFieldValuesMap]);
 
   // Calculate combined registration charges from all selected jobs
   const combinedRegistrationCharges = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    
+
     // Sum up registration_other_charges from all selected jobs' service charges
     return selectedJobIds.reduce((total, jobId) => {
       const jobServiceCharge = jobServiceChargesMap[jobId];
       if (jobServiceCharge && jobServiceCharge.registration_other_charges) {
-        return total + parseFloat(jobServiceCharge.registration_other_charges || 0);
+        return (
+          total + parseFloat(jobServiceCharge.registration_other_charges || 0)
+        );
       }
       return total;
     }, 0);
   }, [selectedJobIds, jobServiceChargesMap]);
 
   // Calculate combined CA charges from all selected jobs
-  // Formula: For each job: (job.no_of_cac * job_service_charges.ca_charges), then sum all
+  // Formula: For each job: (no_of_cac from JobFieldValue * job_service_charges.ca_charges), then sum all
+  // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
   const combinedCaCharges = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    
-    // Calculate for each job: no_of_cac * ca_charges, then sum all
+
+    // Calculate for each job: no_of_cac from JobFieldValue * ca_charges, then sum all
     return selectedJobIds.reduce((total, jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
       const jobServiceCharge = jobServiceChargesMap[jobId];
-      
-      if (job && jobServiceCharge) {
-        const noOfCac = parseFloat(job.no_of_cac || 0);
+      const noOfCacValue =
+        getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
+
+      if (jobServiceCharge && noOfCacValue) {
+        const noOfCac = parseFloat(noOfCacValue || 0);
         const caCharges = parseFloat(jobServiceCharge.ca_charges || 0);
         const jobCaCharge = noOfCac * caCharges;
         return total + jobCaCharge;
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobs, jobServiceChargesMap]);
+  }, [selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
 
   // Calculate combined CE charges from all selected jobs
-  // Formula: For each job: (job.no_of_cec * job_service_charges.ce_charges), then sum all
+  // Formula: For each job: (no_of_cec from JobFieldValue * job_service_charges.ce_charges), then sum all
+  // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
   const combinedCeCharges = useMemo(() => {
     if (selectedJobIds.length === 0) return 0;
-    
-    // Calculate for each job: no_of_cec * ce_charges, then sum all
+
+    // Calculate for each job: no_of_cec from JobFieldValue * ce_charges, then sum all
     return selectedJobIds.reduce((total, jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
       const jobServiceCharge = jobServiceChargesMap[jobId];
-      
-      if (job && jobServiceCharge) {
-        const noOfCec = parseFloat(job.no_of_cec || 0);
+      const noOfCecValue =
+        getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+        getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
+
+      if (jobServiceCharge && noOfCecValue) {
+        const noOfCec = parseFloat(noOfCecValue || 0);
         const ceCharges = parseFloat(jobServiceCharge.ce_charges || 0);
         const jobCeCharge = noOfCec * ceCharges;
         return total + jobCeCharge;
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobs, jobServiceChargesMap]);
+  }, [selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
 
   // Get remi fields from job service charges for the first selected job
+  // Fetch remi_desc and remi_charges from 'job_service_charges' database table according to selected job_id
+  // The data is fetched via API endpoint /jobs/:id/service-charges which queries job_service_charges table filtered by job_id
+  // jobServiceChargesMap is populated in useEffect when selectedJobIds changes (see lines 897-938)
   const remiFields = useMemo(() => {
     if (selectedJobIds.length === 0) return [];
-    
+
     const firstJobId = selectedJobIds[0];
+    // Get job service charge data from job_service_charges table (fetched via API)
     const jobServiceCharge = jobServiceChargesMap[firstJobId];
-    
-    if (!jobServiceCharge) return [];
-    
+
+    if (!jobServiceCharge) {
+      console.log('[remiFields] No job service charge found for jobId:', firstJobId);
+      return [];
+    }
+
+    // Debug: Log the complete jobServiceCharge object to see all available fields
+    console.log('[remiFields] Complete jobServiceCharge object:', jobServiceCharge);
+    console.log('[remiFields] Available keys in jobServiceCharge:', Object.keys(jobServiceCharge));
+
     const remiFieldsArray = [];
-    
+
+    // Extract remi_desc and remi_charges from job_service_charges table data
+    // Support both snake_case (remi_one_desc) and camelCase (remiOneDesc) field names
     // Check each remi field and add if description exists
     const remiFieldsConfig = [
-      { desc: 'remi_one_desc', charges: 'remi_one_charges' },
-      { desc: 'remi_two_desc', charges: 'remi_two_charges' },
-      { desc: 'remi_three_desc', charges: 'remi_three_charges' },
-      { desc: 'remi_four_desc', charges: 'remi_four_charges' },
-      { desc: 'remi_five_desc', charges: 'remi_five_charges' },
+      { 
+        desc: "remi_one_desc", 
+        descCamel: "remiOneDesc",
+        charges: "remi_one_charges",
+        chargesCamel: "remiOneCharges"
+      },
+      { 
+        desc: "remi_two_desc", 
+        descCamel: "remiTwoDesc",
+        charges: "remi_two_charges",
+        chargesCamel: "remiTwoCharges"
+      },
+      { 
+        desc: "remi_three_desc", 
+        descCamel: "remiThreeDesc",
+        charges: "remi_three_charges",
+        chargesCamel: "remiThreeCharges"
+      },
+      { 
+        desc: "remi_four_desc", 
+        descCamel: "remiFourDesc",
+        charges: "remi_four_charges",
+        chargesCamel: "remiFourCharges"
+      },
+      { 
+        desc: "remi_five_desc", 
+        descCamel: "remiFiveDesc",
+        charges: "remi_five_charges",
+        chargesCamel: "remiFiveCharges"
+      },
     ];
-    
-    remiFieldsConfig.forEach((field) => {
-      const description = jobServiceCharge[field.desc];
-      const charges = jobServiceCharge[field.charges];
+
+    remiFieldsConfig.forEach((field, configIndex) => {
+      // Get remi_desc and remi_charges from job_service_charges table
+      // IMPORTANT: Ensure we get the description and charges from the SAME remi field pair
+      // Try both snake_case and camelCase field names to handle different API response formats
+      const description = jobServiceCharge[field.desc] || jobServiceCharge[field.descCamel];
+      const charges = jobServiceCharge[field.charges] || jobServiceCharge[field.chargesCamel];
+
+      // Debug: Log each field pair to verify correct mapping and check all possible field name variations
+      const allPossibleFieldNames = [
+        field.desc,
+        field.descCamel,
+        field.charges,
+        field.chargesCamel,
+        // Also check if Prisma might return different variations
+        field.desc.toLowerCase(),
+        field.desc.toUpperCase(),
+        field.charges.toLowerCase(),
+        field.charges.toUpperCase(),
+      ];
       
-      if (description && description.trim() !== '') {
+      const foundFields = {};
+      allPossibleFieldNames.forEach(name => {
+        if (jobServiceCharge[name] !== undefined) {
+          foundFields[name] = jobServiceCharge[name];
+        }
+      });
+
+      console.log(`[remiFields] Processing remi field ${configIndex + 1}:`, {
+        fieldConfig: field,
+        description: description,
+        descriptionRaw: jobServiceCharge[field.desc],
+        descriptionCamel: jobServiceCharge[field.descCamel],
+        charges: charges,
+        chargesRaw: jobServiceCharge[field.charges],
+        chargesCamel: jobServiceCharge[field.chargesCamel],
+        descriptionSource: jobServiceCharge[field.desc] ? 'snake_case' : (jobServiceCharge[field.descCamel] ? 'camelCase' : 'not found'),
+        chargesSource: jobServiceCharge[field.charges] ? 'snake_case' : (jobServiceCharge[field.chargesCamel] ? 'camelCase' : 'not found'),
+        allFoundFields: foundFields,
+      });
+
+      // Check if description exists and is not null/empty
+      if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
+        // Parse charges - handle both string and number formats
+        // IMPORTANT: remi_charges is stored as VARCHAR(255) in database, so it comes as a string
+        // IMPORTANT: Ensure charges correspond to the SAME remi field as the description
+        // e.g., remi_one_desc should pair with remi_one_charges, not remi_two_charges
+        let parsedCharges = 0;
+        
+        // Check if charges exist and are not null/empty/null string
+        const chargesStr = charges !== null && charges !== undefined ? String(charges).trim() : "";
+        const isChargesEmpty = chargesStr === "" || chargesStr.toUpperCase() === "NULL" || chargesStr === "null";
+        
+        if (!isChargesEmpty) {
+          // Parse the charges value - remi_charges is VARCHAR so it's always a string
+          // Try direct parseFloat first (handles "237.80", "670", etc.)
+          let numValue = parseFloat(chargesStr);
+          
+          // If parseFloat fails, try cleaning the string (remove non-numeric except dots and minus)
+          if (isNaN(numValue) || !isFinite(numValue)) {
+            // Remove all characters except digits, dots, and minus signs
+            const cleanedStr = chargesStr.replace(/[^\d.-]/g, '');
+            numValue = parseFloat(cleanedStr);
+          }
+          
+          // Final check - if still NaN, set to 0
+          parsedCharges = (isNaN(numValue) || !isFinite(numValue)) ? 0 : numValue;
+          
+          console.log(`[remiFields] Parsed charges for "${description}":`, {
+            descriptionField: field.desc,
+            chargesField: field.charges,
+            originalCharges: charges,
+            chargesString: chargesStr,
+            chargesType: typeof charges,
+            parsedValue: parsedCharges,
+            isNaN: isNaN(parsedCharges),
+            isFinite: isFinite(parsedCharges)
+          });
+        } else {
+          console.warn(`[remiFields] Description found but charges missing/null/empty for "${description}"`, {
+            descriptionField: field.desc,
+            chargesField: field.charges,
+            chargesValue: charges,
+            chargesString: chargesStr,
+            isChargesEmpty: isChargesEmpty
+          });
+        }
+
+        // Store the remi field with its corresponding description and charges pair
         remiFieldsArray.push({
-          description: description,
-          charges: parseFloat(charges || 0),
+          description: String(description).trim(),
+          charges: parsedCharges,
+          fieldName: field.charges, // Store the original field name (e.g., "remi_one_charges")
+          fieldIndex: configIndex, // Store the index to maintain order
         });
       }
     });
-    
+
+    console.log('[remiFields] Extracted remi fields:', remiFieldsArray);
     return remiFieldsArray;
   }, [selectedJobIds, jobServiceChargesMap]);
 
@@ -1323,10 +1811,10 @@ export default function InvoiceCreationPage() {
   // Get GST type from first selected job's service charge
   const selectedGstType = useMemo(() => {
     if (selectedJobIds.length === 0) return null;
-    
+
     const firstJobId = selectedJobIds[0];
     const jobServiceCharge = jobServiceChargesMap[firstJobId];
-    
+
     return jobServiceCharge?.gst_type || null;
   }, [selectedJobIds, jobServiceChargesMap]);
 
@@ -1336,11 +1824,17 @@ export default function InvoiceCreationPage() {
     const registrationCharges = parseFloat(combinedRegistrationCharges) || 0;
     const caCharges = parseFloat(combinedCaCharges) || 0;
     const ceCharges = parseFloat(combinedCeCharges) || 0;
-    const rewardDiscountAmount = parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0;
-    
+    const rewardDiscountAmount =
+      parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0;
+
     // Calculate subtotal: baseAmount + all charges + reward
-    const subtotal = baseAmount + registrationCharges + caCharges + ceCharges + rewardDiscountAmount;
-    
+    const subtotal =
+      baseAmount +
+      registrationCharges +
+      caCharges +
+      ceCharges +
+      rewardDiscountAmount;
+
     // Get GST rates from selected job code's gstRate relation (from gst_rates table based on SAC No)
     const baseCgstRate = selectedGstRates.cgstRate || 0;
     const baseSgstRate = selectedGstRates.sgstRate || 0;
@@ -1354,7 +1848,7 @@ export default function InvoiceCreationPage() {
     let sgstAmount = 0;
     let igstAmount = 0;
 
-    if (selectedGstType === 'SC') {
+    if (selectedGstType === "SC") {
       // State/Central GST: Apply CGST and SGST, IGST = 0
       cgstRate = baseCgstRate;
       sgstRate = baseSgstRate;
@@ -1362,7 +1856,7 @@ export default function InvoiceCreationPage() {
       cgstAmount = (subtotal * cgstRate) / 100;
       sgstAmount = (subtotal * sgstRate) / 100;
       igstAmount = 0;
-    } else if (selectedGstType === 'I') {
+    } else if (selectedGstType === "I") {
       // Interstate GST: Apply only IGST, CGST = 0, SGST = 0
       cgstRate = 0;
       sgstRate = 0;
@@ -1370,7 +1864,7 @@ export default function InvoiceCreationPage() {
       cgstAmount = 0;
       sgstAmount = 0;
       igstAmount = (subtotal * igstRate) / 100;
-    } else if (selectedGstType === 'EXEMPTED') {
+    } else if (selectedGstType === "EXEMPTED") {
       // Exempted: No GST applied, all rates = 0
       cgstRate = 0;
       sgstRate = 0;
@@ -1387,17 +1881,23 @@ export default function InvoiceCreationPage() {
       cgstAmount = (subtotal * cgstRate) / 100;
       sgstAmount = (subtotal * sgstRate) / 100;
       // If both CGST and SGST are present, IGST should be 0, otherwise use IGST
-      igstAmount = (cgstRate > 0 || sgstRate > 0) ? 0 : (subtotal * igstRate) / 100;
+      igstAmount =
+        cgstRate > 0 || sgstRate > 0 ? 0 : (subtotal * igstRate) / 100;
     }
 
     // Application fees (reimbursement) - sum of appl_fee_duty_paid from all selected jobs
     const applicationFees = combinedApplicationFees;
-    
+
     // Remi charges (reimbursement) - sum of all remi charges from job service charges
     const remiCharges = combinedRemiCharges;
 
     const total =
-      subtotal + cgstAmount + sgstAmount + igstAmount + applicationFees + remiCharges;
+      subtotal +
+      cgstAmount +
+      sgstAmount +
+      igstAmount +
+      applicationFees +
+      remiCharges;
 
     return {
       baseAmount,
@@ -1416,7 +1916,128 @@ export default function InvoiceCreationPage() {
       totalInWords: numberToWords(total),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalAmount, combinedApplicationFees, combinedRegistrationCharges, combinedCaCharges, combinedCeCharges, combinedRemiCharges, invoiceCalculation.rewardDiscountAmount, selectedGstRates, selectedGstType]);
+  }, [
+    finalAmount,
+    combinedApplicationFees,
+    combinedRegistrationCharges,
+    combinedCaCharges,
+    combinedCeCharges,
+    combinedRemiCharges,
+    invoiceCalculation.rewardDiscountAmount,
+    selectedGstRates,
+    selectedGstType,
+  ]);
+
+  // Calculate invoice amounts based on Pay Amt values from partial invoice breakdown
+  const partialInvoiceCalculations = useMemo(() => {
+    // Use Pay Amt values instead of full amounts
+    const baseAmount = parseFloat(partialInvoiceBreakdown.professionalCharges.payAmt || 0);
+    const registrationCharges = parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0);
+    const caCharges = parseFloat(partialInvoiceBreakdown.caCert.payAmt || 0);
+    const ceCharges = parseFloat(partialInvoiceBreakdown.ceCert.payAmt || 0);
+    const rewardDiscountAmount =
+      parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0;
+
+    // Calculate subtotal: baseAmount + all charges + reward
+    const subtotal =
+      baseAmount +
+      registrationCharges +
+      caCharges +
+      ceCharges +
+      rewardDiscountAmount;
+
+    // Get GST rates from selected job code's gstRate relation (from gst_rates table based on SAC No)
+    const baseCgstRate = selectedGstRates.cgstRate || 0;
+    const baseSgstRate = selectedGstRates.sgstRate || 0;
+    const baseIgstRate = selectedGstRates.igstRate || 0;
+
+    // Apply GST based on gst_type from job_service_charges
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+
+    if (selectedGstType === "SC") {
+      // State/Central GST: Apply CGST and SGST, IGST = 0
+      cgstRate = baseCgstRate;
+      sgstRate = baseSgstRate;
+      igstRate = 0;
+      cgstAmount = (subtotal * cgstRate) / 100;
+      sgstAmount = (subtotal * sgstRate) / 100;
+      igstAmount = 0;
+    } else if (selectedGstType === "I") {
+      // Interstate GST: Apply only IGST, CGST = 0, SGST = 0
+      cgstRate = 0;
+      sgstRate = 0;
+      igstRate = baseIgstRate;
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = (subtotal * igstRate) / 100;
+    } else if (selectedGstType === "EXEMPTED") {
+      // Exempted: No GST applied, all rates = 0
+      cgstRate = 0;
+      sgstRate = 0;
+      igstRate = 0;
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = 0;
+    } else {
+      // Default: If gst_type is not set or null, use the rates from gst_rates table
+      // Apply CGST and SGST if available, otherwise IGST
+      cgstRate = baseCgstRate;
+      sgstRate = baseSgstRate;
+      igstRate = baseIgstRate;
+      cgstAmount = (subtotal * cgstRate) / 100;
+      sgstAmount = (subtotal * sgstRate) / 100;
+      // If both CGST and SGST are present, IGST should be 0, otherwise use IGST
+      igstAmount =
+        cgstRate > 0 || sgstRate > 0 ? 0 : (subtotal * igstRate) / 100;
+    }
+
+    // Application fees (reimbursement) - use Pay Amt value
+    const applicationFees = parseFloat(partialInvoiceBreakdown.applicationFees.payAmt || 0);
+
+    // Remi charges (reimbursement) - sum of Pay Amt values from all remi fields
+    const remiCharges = 
+      parseFloat(partialInvoiceBreakdown.remiOne.payAmt || 0) +
+      parseFloat(partialInvoiceBreakdown.remiTwo.payAmt || 0) +
+      parseFloat(partialInvoiceBreakdown.remiThree.payAmt || 0) +
+      parseFloat(partialInvoiceBreakdown.remiFour.payAmt || 0) +
+      parseFloat(partialInvoiceBreakdown.remiFive.payAmt || 0);
+
+    const total =
+      subtotal +
+      cgstAmount +
+      sgstAmount +
+      igstAmount +
+      applicationFees +
+      remiCharges;
+
+    return {
+      baseAmount,
+      subtotal,
+      // Display rates: Always show the base rates from gst_rates table (based on SAC No)
+      cgstRate: baseCgstRate,
+      sgstRate: baseSgstRate,
+      igstRate: baseIgstRate,
+      // Calculated amounts: Based on gst_type
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      applicationFees,
+      remiCharges,
+      total,
+      totalInWords: numberToWords(total),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    partialInvoiceBreakdown,
+    invoiceCalculation.rewardDiscountAmount,
+    selectedGstRates,
+    selectedGstType,
+  ]);
 
   // Get current date
   const currentDate = useMemo(() => {
@@ -1469,28 +2090,132 @@ export default function InvoiceCreationPage() {
           ? sessionAccount.id
           : selectedClientServiceCharge?.account_id || null;
 
+      // Use Pay Amt values if they exist (for partial invoices), otherwise use full amounts
+      // This ensures the saved amounts match what's displayed in the invoice
+      const professionalCharges = hasPayAmtValues
+        ? parseFloat(partialInvoiceBreakdown.professionalCharges.payAmt || 0)
+        : parseFloat(finalAmount || 0);
+      const registrationCharges = hasPayAmtValues
+        ? parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0)
+        : parseFloat(combinedRegistrationCharges || 0);
+      const caCharges = hasPayAmtValues
+        ? parseFloat(partialInvoiceBreakdown.caCert.payAmt || 0)
+        : parseFloat(combinedCaCharges || 0);
+      const ceCharges = hasPayAmtValues
+        ? parseFloat(partialInvoiceBreakdown.ceCert.payAmt || 0)
+        : parseFloat(combinedCeCharges || 0);
+      const applicationFees = hasPayAmtValues
+        ? parseFloat(partialInvoiceBreakdown.applicationFees.payAmt || 0)
+        : parseFloat(combinedApplicationFees || 0);
+
+      // Create a map of remi charges by field name for efficient lookup
+      // Use Pay Amt values if available, otherwise use charges from job service charges
+      const remiChargesMap = {};
+      remiFields.forEach((field, index) => {
+        const remiKey = `remi${index === 0 ? 'One' : index === 1 ? 'Two' : index === 2 ? 'Three' : index === 3 ? 'Four' : 'Five'}`;
+        
+        // Check if Pay Amt exists for this remi field
+        if (hasPayAmtValues && partialInvoiceBreakdown[remiKey]?.payAmt !== undefined && partialInvoiceBreakdown[remiKey]?.payAmt !== null) {
+          remiChargesMap[field.fieldName] = parseFloat(partialInvoiceBreakdown[remiKey].payAmt || 0);
+        } else {
+          remiChargesMap[field.fieldName] = field.charges;
+        }
+      });
+
+      // Calculate final total amount for pay_amount field
+      // IMPORTANT: This must match what's displayed in the Sample Invoice
+      const calculations = hasPayAmtValues ? partialInvoiceCalculations : invoiceCalculations;
+      let finalTotalAmount = 0;
+      
+      if (billingType === "Reimbursement") {
+        // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
+        finalTotalAmount = (
+          parseFloat(applicationFees || 0) +
+          parseFloat(remiChargesMap["remi_one_charges"] || 0) +
+          parseFloat(remiChargesMap["remi_two_charges"] || 0) +
+          parseFloat(remiChargesMap["remi_three_charges"] || 0) +
+          parseFloat(remiChargesMap["remi_four_charges"] || 0) +
+          parseFloat(remiChargesMap["remi_five_charges"] || 0) +
+          (parseFloat(invoiceCalculation.rewardDiscountAmount || 0) < 0
+            ? parseFloat(invoiceCalculation.rewardDiscountAmount || 0)
+            : 0)
+        );
+      } else if (billingType === "Service") {
+        // For Service: Only Service section fields (Subtotal + GST)
+        // Do NOT include application fees or remi charges (they're not displayed)
+        const serviceSubtotal = (
+          parseFloat(professionalCharges || 0) +
+          parseFloat(registrationCharges || 0) +
+          parseFloat(caCharges || 0) +
+          parseFloat(ceCharges || 0) +
+          parseFloat(invoiceCalculation.rewardDiscountAmount || 0)
+        );
+        // Add GST amounts
+        const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
+        finalTotalAmount = serviceSubtotal + gstTotal;
+      } else {
+        // For Service & Reimbursement: Subtotal + GST + Application Fees + Remi Charges
+        finalTotalAmount = calculations?.total || 0;
+      }
+
       // Prepare invoice data
+      // IMPORTANT: Only store fields that are displayed in the invoice UI
+      // For "Service": Don't store application_fees or remi charges (not displayed)
+      // For "Reimbursement": Don't store service charges (not displayed)
+      // For "Service & Reimbursement": Store all fields (all displayed)
+      
       const invoiceData = {
         account_id: effectiveAccountId ? parseInt(effectiveAccountId) : null, // Account ID for draft_view_id generation
         job_register_id: parseInt(selectedJobCode),
         billing_type: billingType,
         invoice_type: invoiceType,
-        pay_amount: finalAmount, // This is the final amount from line 2206-2210
-        amount: invoiceCalculation.amount || finalAmount,
-        professional_charges: parseFloat(finalAmount) || 0,
-        registration_other_charges: parseFloat(combinedRegistrationCharges) || 0,
-        ca_charges: parseFloat(combinedCaCharges) || 0,
-        ce_charges: parseFloat(combinedCeCharges) || 0,
-        ca_cert_count: combinedCaCertCount || 0,
-        ce_cert_count: combinedCeCertCount || 0,
-        application_fees: parseFloat(combinedApplicationFees) || 0,
-        remi_one_charges: remiFields[0]?.charges ? parseFloat(remiFields[0].charges) : 0,
-        remi_two_charges: remiFields[1]?.charges ? parseFloat(remiFields[1].charges) : 0,
-        remi_three_charges: remiFields[2]?.charges ? parseFloat(remiFields[2].charges) : 0,
-        remi_four_charges: remiFields[3]?.charges ? parseFloat(remiFields[3].charges) : 0,
-        remi_five_charges: remiFields[4]?.charges ? String(remiFields[4].charges) : null,
-        reward_penalty_input: invoiceCalculation.rewardDiscountPercent || "0",
-        reward_penalty_amount: parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0,
+        pay_amount: finalTotalAmount.toFixed(2), // Use calculated total amount
+        // Service charges - only store if displayed (Service or Service & Reimbursement)
+        amount: billingType === "Reimbursement" 
+          ? null 
+          : (invoiceCalculation.amount || professionalCharges.toFixed(2)),
+        professional_charges: billingType === "Reimbursement" ? 0 : professionalCharges,
+        registration_other_charges: billingType === "Reimbursement" ? 0 : registrationCharges,
+        ca_charges: billingType === "Reimbursement" ? 0 : caCharges,
+        ce_charges: billingType === "Reimbursement" ? 0 : ceCharges,
+        ca_cert_count: billingType === "Reimbursement" ? 0 : (combinedCaCertCount || 0),
+        ce_cert_count: billingType === "Reimbursement" ? 0 : (combinedCeCertCount || 0),
+        // Reimbursement charges - only store if displayed (Reimbursement or Service & Reimbursement)
+        application_fees: billingType === "Service" ? 0 : applicationFees,
+        // Map remi charges based on their field name, using Pay Amt if available
+        // Only store if displayed (Reimbursement or Service & Reimbursement)
+        remi_one_charges: billingType === "Service" 
+          ? 0 
+          : (remiChargesMap["remi_one_charges"]
+              ? parseFloat(remiChargesMap["remi_one_charges"])
+              : 0),
+        remi_two_charges: billingType === "Service"
+          ? 0
+          : (remiChargesMap["remi_two_charges"]
+              ? parseFloat(remiChargesMap["remi_two_charges"])
+              : 0),
+        remi_three_charges: billingType === "Service"
+          ? 0
+          : (remiChargesMap["remi_three_charges"]
+              ? parseFloat(remiChargesMap["remi_three_charges"])
+              : 0),
+        remi_four_charges: billingType === "Service"
+          ? 0
+          : (remiChargesMap["remi_four_charges"]
+              ? parseFloat(remiChargesMap["remi_four_charges"])
+              : 0),
+        remi_five_charges: billingType === "Service"
+          ? null
+          : (remiChargesMap["remi_five_charges"]
+              ? String(remiChargesMap["remi_five_charges"])
+              : null),
+        // Reward/Discount - only store if displayed (Service or Service & Reimbursement)
+        reward_penalty_input: billingType === "Reimbursement" 
+          ? "0" 
+          : (invoiceCalculation.rewardDiscountPercent || "0"),
+        reward_penalty_amount: billingType === "Reimbursement"
+          ? 0
+          : (parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0),
         note: sampleInvoiceData.note || null,
         po_no: sampleInvoiceData.poNo || null,
         irn_no: sampleInvoiceData.irnNo || null,
@@ -1517,21 +2242,54 @@ export default function InvoiceCreationPage() {
       console.error("Error saving invoice:", error);
       console.error("Error response:", error.response?.data);
       console.error("Error details:", error.response?.data?.details);
-      
-      const errorMessage = 
-        error.response?.data?.details || 
+
+      const errorMessage =
+        error.response?.data?.details ||
         error.response?.data?.error ||
         error.message ||
         "Failed to save invoice. Please try again.";
-      
+
       alert(`Error: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
   };
 
+  // Check if any Pay Amt values are set (indicating partial invoice)
+  const hasPayAmtValues = useMemo(() => {
+    return (
+      parseFloat(partialInvoiceBreakdown.professionalCharges.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.caCert.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.ceCert.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.applicationFees.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.remiOne.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.remiTwo.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.remiThree.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.remiFour.payAmt || 0) > 0 ||
+      parseFloat(partialInvoiceBreakdown.remiFive.payAmt || 0) > 0
+    );
+  }, [partialInvoiceBreakdown]);
+
   // Prepare invoice data for sample invoice
   const sampleInvoiceData = useMemo(() => {
+    // Use Pay Amt values if they exist, otherwise use full amounts
+    const professionalCharges = hasPayAmtValues
+      ? parseFloat(partialInvoiceBreakdown.professionalCharges.payAmt || 0)
+      : parseFloat(finalAmount || 0);
+    const registrationCharges = hasPayAmtValues
+      ? parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0)
+      : parseFloat(combinedRegistrationCharges || 0);
+    const caCharges = hasPayAmtValues
+      ? parseFloat(partialInvoiceBreakdown.caCert.payAmt || 0)
+      : parseFloat(combinedCaCharges || 0);
+    const ceCharges = hasPayAmtValues
+      ? parseFloat(partialInvoiceBreakdown.ceCert.payAmt || 0)
+      : parseFloat(combinedCeCharges || 0);
+    const applicationFees = hasPayAmtValues
+      ? parseFloat(partialInvoiceBreakdown.applicationFees.payAmt || 0)
+      : parseFloat(combinedApplicationFees || 0);
+
     return {
       account: sessionAccount,
       invoiceNo: "NA",
@@ -1548,14 +2306,14 @@ export default function InvoiceCreationPage() {
       serviceDetails: selectedJobCodeName,
       chargesAsUnder: "NA",
       amount: invoiceCalculation.amount || "0",
-      finalAmount: finalAmount,
+      finalAmount: professionalCharges,
       rewardDiscountAmount: invoiceCalculation.rewardDiscountAmount || "0",
-      registrationCharges: combinedRegistrationCharges.toFixed(2),
+      registrationCharges: registrationCharges.toFixed(2),
       caCertCount: 0,
       ceCertCount: 0,
-      caCharges: combinedCaCharges.toFixed(2),
-      ceCharges: combinedCeCharges.toFixed(2),
-      applicationFees: "0",
+      caCharges: caCharges.toFixed(2),
+      ceCharges: ceCharges.toFixed(2),
+      applicationFees: applicationFees.toFixed(2),
       kindAttn: "NA",
       emails: "NA",
       sacNo: selectedSacNo,
@@ -1576,6 +2334,9 @@ export default function InvoiceCreationPage() {
     combinedRegistrationCharges,
     combinedCaCharges,
     combinedCeCharges,
+    combinedApplicationFees,
+    partialInvoiceBreakdown,
+    hasPayAmtValues,
   ]);
 
   return (
@@ -1764,8 +2525,17 @@ export default function InvoiceCreationPage() {
                             percentage: calculated.percentage,
                             perShb: calculated.perShb,
                           }));
-                          // Show modal when jobs are selected
-                          setShowInvoiceModal(true);
+                          // If invoiceType is "Partial Invoice", show partial invoice modal
+                          if (invoiceType === "Partial Invoice") {
+                            setShowPartialInvoiceModal(true);
+                          }
+                          // If billingType is "Reimbursement", directly show sample invoice
+                          // Otherwise, show the calculation modal
+                          else if (billingType === "Reimbursement") {
+                            handleShowSampleInvoice();
+                          } else {
+                            setShowInvoiceModal(true);
+                          }
                         }}
                         className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 font-medium"
                       >
@@ -1865,8 +2635,17 @@ export default function InvoiceCreationPage() {
                             percentage: calculated.percentage,
                             perShb: calculated.perShb,
                           }));
-                          // Show modal when jobs are selected
-                          setShowInvoiceModal(true);
+                          // If invoiceType is "Partial Invoice", show partial invoice modal
+                          if (invoiceType === "Partial Invoice") {
+                            setShowPartialInvoiceModal(true);
+                          }
+                          // If billingType is "Reimbursement", directly show sample invoice
+                          // Otherwise, show the calculation modal
+                          else if (billingType === "Reimbursement") {
+                            handleShowSampleInvoice();
+                          } else {
+                            setShowInvoiceModal(true);
+                          }
                         }}
                         className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 font-medium"
                       >
@@ -1881,8 +2660,8 @@ export default function InvoiceCreationPage() {
         </div>
       )}
 
-      {/* Invoice Amount Calculation Modal */}
-      {showInvoiceModal && (
+      {/* Invoice Amount Calculation Modal - Hidden for Reimbursement billing type */}
+      {showInvoiceModal && billingType !== "Reimbursement" && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
           onClick={() => setShowInvoiceModal(false)}
@@ -1950,32 +2729,14 @@ export default function InvoiceCreationPage() {
                     <input
                       type="number"
                       step="0.01"
-                      value={finalAmount}
+                      value={parseFloat(invoiceCalculation.amount || 0).toFixed(
+                        2
+                      )}
                       readOnly
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                       placeholder="0.00"
                       disabled
                     />
-                    {invoiceCalculation.rewardDiscountAmount &&
-                      parseFloat(invoiceCalculation.rewardDiscountAmount) !==
-                        0 && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Base:{" "}
-                          {parseFloat(invoiceCalculation.amount || 0).toFixed(
-                            2
-                          )}{" "}
-                          |
-                          {parseFloat(
-                            invoiceCalculation.rewardDiscountAmount
-                          ) >= 0
-                            ? " Reward: +"
-                            : " Discount: "}
-                          {Math.abs(
-                            parseFloat(invoiceCalculation.rewardDiscountAmount)
-                          ).toFixed(2)}{" "}
-                          = Final: {finalAmount}
-                        </p>
-                      )}
                   </div>
 
                   {/* % Column - Display percentage amount */}
@@ -2040,6 +2801,10 @@ export default function InvoiceCreationPage() {
                           rewardDiscountPercent: "",
                           rewardDiscountAmount: "",
                         }));
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          percent: "",
+                        }));
                         return;
                       }
 
@@ -2051,14 +2816,28 @@ export default function InvoiceCreationPage() {
                         return;
                       }
 
+                      // Validate: should not exceed 100 (absolute value)
+                      if (numericValue > 100) {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          percent: "Percentage cannot exceed 100%",
+                        }));
+                        numericValue = 100;
+                      } else {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          percent: "",
+                        }));
+                      }
+
                       // Clamp value between 0 and 100 (absolute value)
                       numericValue = Math.max(0, Math.min(100, numericValue));
                       const signedValue =
                         sign === "-" ? -numericValue : numericValue;
                       const formattedValue =
                         signedValue >= 0
-                          ? `+${numericValue}`
-                          : `${numericValue}`;
+                          ? `+${numericValue.toFixed(2)}`
+                          : `-${numericValue.toFixed(2)}`;
 
                       const baseAmount =
                         parseFloat(invoiceCalculation.amount) || 0;
@@ -2075,13 +2854,23 @@ export default function InvoiceCreationPage() {
                       }));
                     }}
                     onWheel={(e) => e.target.blur()}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      rewardDiscountErrors.percent
+                        ? "border-red-500 focus:border-red-500"
+                        : "border-gray-300 focus:border-primary-500"
+                    }`}
                     placeholder="Enter + for Reward, - for Discount (Range: -100 to +100)"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Range: -100% to +100% | +0.01 to +100 = Reward, -0.01 to
-                    -100 = Discount
-                  </p>
+                  {rewardDiscountErrors.percent ? (
+                    <p className="text-xs text-red-500 mt-1">
+                      {rewardDiscountErrors.percent}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Range: -100% to +100% | +0.01 to +100 = Reward, -0.01 to
+                      -100 = Discount | Supports 2 decimal places
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -2089,11 +2878,15 @@ export default function InvoiceCreationPage() {
                     Reward/Discount Amount
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    ref={rewardDiscountAmountInputRef}
+                    type="text"
+                    inputMode="decimal"
                     value={invoiceCalculation.rewardDiscountAmount || ""}
                     onChange={handleRewardDiscountAmountChange}
                     onBlur={(e) => {
+                      // Clear typing flag
+                      isTypingRewardDiscountRef.current = false;
+
                       // Ensure value is formatted to 2 decimal places on blur
                       const value = e.target.value.trim();
                       if (value === "") {
@@ -2101,6 +2894,10 @@ export default function InvoiceCreationPage() {
                           ...prev,
                           rewardDiscountAmount: "",
                           rewardDiscountPercent: "",
+                        }));
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "",
                         }));
                         return;
                       }
@@ -2113,6 +2910,24 @@ export default function InvoiceCreationPage() {
                         const baseAmount =
                           parseFloat(invoiceCalculation.amount) || 0;
                         if (baseAmount > 0) {
+                          // Validate: amount should not exceed base amount (absolute value)
+                          if (Math.abs(numericValue) > baseAmount) {
+                            setRewardDiscountErrors((prev) => ({
+                              ...prev,
+                              amount: `Amount cannot exceed base amount of ${baseAmount.toFixed(
+                                2
+                              )}`,
+                            }));
+                            // Clamp the value to base amount
+                            numericValue =
+                              numericValue >= 0 ? baseAmount : -baseAmount;
+                          } else {
+                            setRewardDiscountErrors((prev) => ({
+                              ...prev,
+                              amount: "",
+                            }));
+                          }
+
                           const calculatedPercent =
                             (Math.abs(numericValue) / baseAmount) * 100;
                           // Clamp percentage between 0 and 100 (absolute value)
@@ -2122,8 +2937,8 @@ export default function InvoiceCreationPage() {
                           );
                           const formattedPercent =
                             numericValue >= 0
-                              ? `+${clampedPercent}`
-                              : `-${clampedPercent}`;
+                              ? `+${clampedPercent.toFixed(2)}`
+                              : `-${clampedPercent.toFixed(2)}`;
 
                           setInvoiceCalculation((prev) => ({
                             ...prev,
@@ -2139,12 +2954,22 @@ export default function InvoiceCreationPage() {
                       }
                     }}
                     onWheel={(e) => e.target.blur()}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      rewardDiscountErrors.amount
+                        ? "border-red-500 focus:border-red-500"
+                        : "border-gray-300 focus:border-primary-500"
+                    }`}
                     placeholder="0.00"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    2 decimal places only
-                  </p>
+                  {rewardDiscountErrors.amount ? (
+                    <p className="text-xs text-red-500 mt-1">
+                      {rewardDiscountErrors.amount}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">
+                      2 decimal places only | Cannot exceed base amount
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -2157,6 +2982,566 @@ export default function InvoiceCreationPage() {
               >
                 Show Sample Invoice
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Partial Invoice Details Modal */}
+      {showPartialInvoiceModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowPartialInvoiceModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-6xl mx-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Invoice Details
+              </h2>
+              <button
+                onClick={() => setShowPartialInvoiceModal(false)}
+                className="text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded p-1"
+                aria-label="Close modal"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {/* Service Charges Breakdown */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Service Charges Breakdown
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse border border-gray-300">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="border border-gray-300 px-4 py-2 text-left text-sm font-semibold text-gray-700">
+                          Description
+                        </th>
+                        <th className="border border-gray-300 px-4 py-2 text-right text-sm font-semibold text-gray-700">
+                          Amount (₹)
+                        </th>
+                        <th className="border border-gray-300 px-4 py-2 text-right text-sm font-semibold text-gray-700">
+                          Opening Amt
+                        </th>
+                        <th className="border border-gray-300 px-4 py-2 text-right text-sm font-semibold text-gray-700">
+                          Pay Amt
+                        </th>
+                        <th className="border border-gray-300 px-4 py-2 text-right text-sm font-semibold text-gray-700">
+                          Remaining Amt
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Professional Charges */}
+                      {parseFloat(finalAmount || 0) > 0 && (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Professional Charges
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {parseFloat(finalAmount || 0).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.professionalCharges.openingAmt || ""}
+                            placeholder="0"
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.professionalCharges.payAmt || ""}
+                            placeholder="0"
+                            max={parseFloat(finalAmount || 0) - partialInvoiceBreakdown.professionalCharges.openingAmt}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
+                              const maxPayAmt = parseFloat(finalAmount || 0) - partialInvoiceBreakdown.professionalCharges.openingAmt;
+                              const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                              setPartialInvoiceBreakdown((prev) => ({
+                                ...prev,
+                                professionalCharges: {
+                                  ...prev.professionalCharges,
+                                  payAmt: finalValue >= 0 ? finalValue : 0,
+                                },
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(finalAmount || 0) -
+                            partialInvoiceBreakdown.professionalCharges.openingAmt -
+                            partialInvoiceBreakdown.professionalCharges.payAmt
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                      )}
+
+                      {/* Registration/Other Charges */}
+                      {parseFloat(combinedRegistrationCharges || 0) > 0 && (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Registration/Other Charges
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {parseFloat(combinedRegistrationCharges || 0).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.registrationCharges.openingAmt || ""}
+                            placeholder="0"
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.registrationCharges.payAmt || ""}
+                            placeholder="0"
+                            max={parseFloat(combinedRegistrationCharges || 0) - partialInvoiceBreakdown.registrationCharges.openingAmt}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
+                              const maxPayAmt = parseFloat(combinedRegistrationCharges || 0) - partialInvoiceBreakdown.registrationCharges.openingAmt;
+                              const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                              setPartialInvoiceBreakdown((prev) => ({
+                                ...prev,
+                                registrationCharges: {
+                                  ...prev.registrationCharges,
+                                  payAmt: finalValue >= 0 ? finalValue : 0,
+                                },
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(combinedRegistrationCharges || 0) -
+                            partialInvoiceBreakdown.registrationCharges.openingAmt -
+                            partialInvoiceBreakdown.registrationCharges.payAmt
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                      )}
+
+                      {/* Arrangement of CA CERT */}
+                      {parseFloat(combinedCaCharges || 0) > 0 && (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Arrangement of CA CERT. ({combinedCaCertCount} Nos)
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {parseFloat(combinedCaCharges || 0).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.caCert.openingAmt || ""}
+                            placeholder="0"
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.caCert.payAmt || ""}
+                            placeholder="0"
+                            max={parseFloat(combinedCaCharges || 0) - partialInvoiceBreakdown.caCert.openingAmt}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
+                              const maxPayAmt = parseFloat(combinedCaCharges || 0) - partialInvoiceBreakdown.caCert.openingAmt;
+                              const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                              setPartialInvoiceBreakdown((prev) => ({
+                                ...prev,
+                                caCert: {
+                                  ...prev.caCert,
+                                  payAmt: finalValue >= 0 ? finalValue : 0,
+                                },
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(combinedCaCharges || 0) -
+                            partialInvoiceBreakdown.caCert.openingAmt -
+                            partialInvoiceBreakdown.caCert.payAmt
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                      )}
+
+                      {/* Arrangement of CE CERT */}
+                      {parseFloat(combinedCeCharges || 0) > 0 && (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Arrangement of CE CERT. ({combinedCeCertCount} Nos)
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {parseFloat(combinedCeCharges || 0).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.ceCert.openingAmt || ""}
+                            placeholder="0"
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.ceCert.payAmt || ""}
+                            placeholder="0"
+                            max={parseFloat(combinedCeCharges || 0) - partialInvoiceBreakdown.ceCert.openingAmt}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
+                              const maxPayAmt = parseFloat(combinedCeCharges || 0) - partialInvoiceBreakdown.ceCert.openingAmt;
+                              const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                              setPartialInvoiceBreakdown((prev) => ({
+                                ...prev,
+                                ceCert: {
+                                  ...prev.ceCert,
+                                  payAmt: finalValue >= 0 ? finalValue : 0,
+                                },
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(combinedCeCharges || 0) -
+                            partialInvoiceBreakdown.ceCert.openingAmt -
+                            partialInvoiceBreakdown.ceCert.payAmt
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                      )}
+
+                      {/* Application Fees */}
+                      {parseFloat(combinedApplicationFees || 0) > 0 && (
+                      <tr>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Application Fees
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {parseFloat(combinedApplicationFees || 0).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.applicationFees.openingAmt || ""}
+                            placeholder="0"
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={partialInvoiceBreakdown.applicationFees.payAmt || ""}
+                            placeholder="0"
+                            max={parseFloat(combinedApplicationFees || 0) - partialInvoiceBreakdown.applicationFees.openingAmt}
+                            onChange={(e) => {
+                              const value = parseFloat(e.target.value) || 0;
+                              const maxPayAmt = parseFloat(combinedApplicationFees || 0) - partialInvoiceBreakdown.applicationFees.openingAmt;
+                              const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                              setPartialInvoiceBreakdown((prev) => ({
+                                ...prev,
+                                applicationFees: {
+                                  ...prev.applicationFees,
+                                  payAmt: finalValue >= 0 ? finalValue : 0,
+                                },
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(combinedApplicationFees || 0) -
+                            partialInvoiceBreakdown.applicationFees.openingAmt -
+                            partialInvoiceBreakdown.applicationFees.payAmt
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                      )}
+
+                      {/* R1-R5 (Remi Charges) */}
+                      {remiFields.map((remiField, index) => {
+                        const remiKey = `remi${index === 0 ? 'One' : index === 1 ? 'Two' : index === 2 ? 'Three' : index === 3 ? 'Four' : 'Five'}`;
+                        const remiAmount = parseFloat(remiField.charges || 0);
+                        const breakdown = partialInvoiceBreakdown[remiKey] || { openingAmt: 0, payAmt: 0 };
+                        
+                        // Only show if amount is greater than 0
+                        if (remiAmount <= 0) return null;
+                        
+                        return (
+                          <tr key={index}>
+                            <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                              {remiField.description || `R${index + 1}`}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                              {remiAmount.toFixed(2)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={breakdown.openingAmt || ""}
+                                placeholder="0"
+                                readOnly
+                                className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 cursor-not-allowed"
+                              />
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={breakdown.payAmt || ""}
+                                placeholder="0"
+                                max={remiAmount - breakdown.openingAmt}
+                                onChange={(e) => {
+                                  const value = parseFloat(e.target.value) || 0;
+                                  const maxPayAmt = remiAmount - breakdown.openingAmt;
+                                  const finalValue = value > maxPayAmt ? maxPayAmt : value;
+                                  setPartialInvoiceBreakdown((prev) => ({
+                                    ...prev,
+                                    [remiKey]: {
+                                      ...(prev[remiKey] || { openingAmt: 0, payAmt: 0 }),
+                                      payAmt: finalValue >= 0 ? finalValue : 0,
+                                    },
+                                  }));
+                                }}
+                                className="w-full px-2 py-1 text-sm text-right border-0 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-transparent"
+                              />
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                              {(remiAmount - breakdown.openingAmt - breakdown.payAmt).toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      }).filter(Boolean)}
+
+                      {/* Fill empty R rows if less than 5 remi fields - Hidden as they have 0.00 amount */}
+
+                      {/* Total Service Charges */}
+                      <tr className="bg-gray-50 font-semibold">
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900">
+                          Total Service Charges
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900">
+                          {(
+                            parseFloat(finalAmount || 0) +
+                            parseFloat(combinedRegistrationCharges || 0) +
+                            parseFloat(combinedCaCharges || 0) +
+                            parseFloat(combinedCeCharges || 0) +
+                            parseFloat(combinedApplicationFees || 0) +
+                            parseFloat(combinedRemiCharges || 0)
+                          ).toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={(
+                              partialInvoiceBreakdown.professionalCharges.openingAmt +
+                              partialInvoiceBreakdown.registrationCharges.openingAmt +
+                              partialInvoiceBreakdown.caCert.openingAmt +
+                              partialInvoiceBreakdown.ceCert.openingAmt +
+                              partialInvoiceBreakdown.applicationFees.openingAmt +
+                              partialInvoiceBreakdown.remiOne.openingAmt +
+                              partialInvoiceBreakdown.remiTwo.openingAmt +
+                              partialInvoiceBreakdown.remiThree.openingAmt +
+                              partialInvoiceBreakdown.remiFour.openingAmt +
+                              partialInvoiceBreakdown.remiFive.openingAmt
+                            ).toFixed(2)}
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 font-semibold cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={(
+                              partialInvoiceBreakdown.professionalCharges.payAmt +
+                              partialInvoiceBreakdown.registrationCharges.payAmt +
+                              partialInvoiceBreakdown.caCert.payAmt +
+                              partialInvoiceBreakdown.ceCert.payAmt +
+                              partialInvoiceBreakdown.applicationFees.payAmt +
+                              partialInvoiceBreakdown.remiOne.payAmt +
+                              partialInvoiceBreakdown.remiTwo.payAmt +
+                              partialInvoiceBreakdown.remiThree.payAmt +
+                              partialInvoiceBreakdown.remiFour.payAmt +
+                              partialInvoiceBreakdown.remiFive.payAmt
+                            ).toFixed(2)}
+                            readOnly
+                            className="w-full px-2 py-1 text-sm text-right border-0 bg-gray-50 font-semibold cursor-not-allowed"
+                          />
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-sm text-right text-gray-900 font-semibold">
+                          {(
+                            parseFloat(finalAmount || 0) +
+                            parseFloat(combinedRegistrationCharges || 0) +
+                            parseFloat(combinedCaCharges || 0) +
+                            parseFloat(combinedCeCharges || 0) +
+                            parseFloat(combinedApplicationFees || 0) +
+                            parseFloat(combinedRemiCharges || 0) -
+                            (
+                              partialInvoiceBreakdown.professionalCharges.openingAmt +
+                              partialInvoiceBreakdown.registrationCharges.openingAmt +
+                              partialInvoiceBreakdown.caCert.openingAmt +
+                              partialInvoiceBreakdown.ceCert.openingAmt +
+                              partialInvoiceBreakdown.applicationFees.openingAmt +
+                              partialInvoiceBreakdown.remiOne.openingAmt +
+                              partialInvoiceBreakdown.remiTwo.openingAmt +
+                              partialInvoiceBreakdown.remiThree.openingAmt +
+                              partialInvoiceBreakdown.remiFour.openingAmt +
+                              partialInvoiceBreakdown.remiFive.openingAmt
+                            ) -
+                            (
+                              partialInvoiceBreakdown.professionalCharges.payAmt +
+                              partialInvoiceBreakdown.registrationCharges.payAmt +
+                              partialInvoiceBreakdown.caCert.payAmt +
+                              partialInvoiceBreakdown.ceCert.payAmt +
+                              partialInvoiceBreakdown.applicationFees.payAmt +
+                              partialInvoiceBreakdown.remiOne.payAmt +
+                              partialInvoiceBreakdown.remiTwo.payAmt +
+                              partialInvoiceBreakdown.remiThree.payAmt +
+                              partialInvoiceBreakdown.remiFour.payAmt +
+                              partialInvoiceBreakdown.remiFive.payAmt
+                            )
+                          ).toFixed(2)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Total Amount Summary */}
+              <div className="mt-6 pt-4 border-t border-gray-300">
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <span className="text-sm font-semibold text-gray-700 block mb-1">Total Amount</span>
+                    <span className="text-base text-gray-900 font-medium">
+                      {(
+                        parseFloat(finalAmount || 0) +
+                        parseFloat(combinedRegistrationCharges || 0) +
+                        parseFloat(combinedCaCharges || 0) +
+                        parseFloat(combinedCeCharges || 0) +
+                        parseFloat(combinedApplicationFees || 0) +
+                        parseFloat(combinedRemiCharges || 0)
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-gray-700 block mb-1">Pay Amount</span>
+                    <span className="text-base text-gray-900 font-medium">
+                      {(
+                        partialInvoiceBreakdown.professionalCharges.payAmt +
+                        partialInvoiceBreakdown.registrationCharges.payAmt +
+                        partialInvoiceBreakdown.caCert.payAmt +
+                        partialInvoiceBreakdown.ceCert.payAmt +
+                        partialInvoiceBreakdown.applicationFees.payAmt +
+                        partialInvoiceBreakdown.remiOne.payAmt +
+                        partialInvoiceBreakdown.remiTwo.payAmt +
+                        partialInvoiceBreakdown.remiThree.payAmt +
+                        partialInvoiceBreakdown.remiFour.payAmt +
+                        partialInvoiceBreakdown.remiFive.payAmt
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-gray-700 block mb-1">Remaining</span>
+                    <span className="text-base text-gray-900 font-medium">
+                      {(
+                        parseFloat(finalAmount || 0) +
+                        parseFloat(combinedRegistrationCharges || 0) +
+                        parseFloat(combinedCaCharges || 0) +
+                        parseFloat(combinedCeCharges || 0) +
+                        parseFloat(combinedApplicationFees || 0) +
+                        parseFloat(combinedRemiCharges || 0) -
+                        (
+                          partialInvoiceBreakdown.professionalCharges.openingAmt +
+                          partialInvoiceBreakdown.registrationCharges.openingAmt +
+                          partialInvoiceBreakdown.caCert.openingAmt +
+                          partialInvoiceBreakdown.ceCert.openingAmt +
+                          partialInvoiceBreakdown.applicationFees.openingAmt +
+                          partialInvoiceBreakdown.remiOne.openingAmt +
+                          partialInvoiceBreakdown.remiTwo.openingAmt +
+                          partialInvoiceBreakdown.remiThree.openingAmt +
+                          partialInvoiceBreakdown.remiFour.openingAmt +
+                          partialInvoiceBreakdown.remiFive.openingAmt
+                        ) -
+                        (
+                          partialInvoiceBreakdown.professionalCharges.payAmt +
+                          partialInvoiceBreakdown.registrationCharges.payAmt +
+                          partialInvoiceBreakdown.caCert.payAmt +
+                          partialInvoiceBreakdown.ceCert.payAmt +
+                          partialInvoiceBreakdown.applicationFees.payAmt +
+                          partialInvoiceBreakdown.remiOne.payAmt +
+                          partialInvoiceBreakdown.remiTwo.payAmt +
+                          partialInvoiceBreakdown.remiThree.payAmt +
+                          partialInvoiceBreakdown.remiFour.payAmt +
+                          partialInvoiceBreakdown.remiFive.payAmt
+                        )
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      setShowSampleInvoice(true);
+                    }}
+                    className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 font-medium"
+                  >
+                    Show Sample INV
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2187,7 +3572,19 @@ export default function InvoiceCreationPage() {
                 {loading ? "Saving..." : "Save Invoice"}
               </button>
               <button
-                onClick={() => window.print()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!isPrintingRef.current) {
+                    isPrintingRef.current = true;
+                    window.print();
+                    // Reset after a short delay to allow print dialog to open
+                    setTimeout(() => {
+                      isPrintingRef.current = false;
+                    }, 1000);
+                  }
+                }}
                 className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium"
               >
                 Print Invoice
@@ -2197,8 +3594,31 @@ export default function InvoiceCreationPage() {
 
           {/* Invoice Container - Paper-like appearance */}
           <div className="max-w-4xl mx-auto p-4 print:p-0 print:max-w-full">
+            {(() => {
+              // Use partial invoice calculations if Pay Amt values are set, otherwise use regular calculations
+              const calculations = hasPayAmtValues ? partialInvoiceCalculations : invoiceCalculations;
+              
+              // Get remi field descriptions from job service charges for Pay Amt display
+              const getRemiDescription = (remiKey) => {
+                if (selectedJobIds.length === 0) return "";
+                const firstJobId = selectedJobIds[0];
+                const jobServiceCharge = jobServiceChargesMap[firstJobId];
+                if (!jobServiceCharge) return "";
+                
+                const remiDescMap = {
+                  remiOne: "remi_one_desc",
+                  remiTwo: "remi_two_desc",
+                  remiThree: "remi_three_desc",
+                  remiFour: "remi_four_desc",
+                  remiFive: "remi_five_desc",
+                };
+                
+                return jobServiceCharge[remiDescMap[remiKey]] || "";
+              };
+              
+              return (
             <div
-              className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-2"
+              className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-4"
               style={{ minHeight: "29.7cm" }}
             >
               {/* Top Section: Company Info (Left) and Invoice Details (Right) */}
@@ -2240,9 +3660,13 @@ export default function InvoiceCreationPage() {
                     </div>
                     {selectedJobIds.length > 0 &&
                       jobServiceChargesMap[selectedJobIds[0]] &&
-                      jobServiceChargesMap[selectedJobIds[0]].client_address && (
+                      jobServiceChargesMap[selectedJobIds[0]]
+                        .client_address && (
                         <div className="text-xs mb-1 ms-5">
-                          {jobServiceChargesMap[selectedJobIds[0]].client_address}
+                          {
+                            jobServiceChargesMap[selectedJobIds[0]]
+                              .client_address
+                          }
                         </div>
                       )}
                   </div>
@@ -2283,7 +3707,7 @@ export default function InvoiceCreationPage() {
                 <div className="col-span-4">
                   <div className="p-3">
                     <div className="font-bold text-base mb-1 text-start">
-                      GST Invoice
+                      {billingType === "Reimbursement" ? "Reimbursement/Debit Note" : "GST Invoice"}
                     </div>
                     <div className="text-xs grid grid-cols-12">
                       <div className="col-span-5">
@@ -2295,21 +3719,15 @@ export default function InvoiceCreationPage() {
                         <div>IRN No. :</div>
                       </div>
                       <div className="col-span-7">
+                        <div>{sampleInvoiceData.invoiceNo || "NA"}</div>
+                        <div>{sampleInvoiceData.date || "NA"}</div>
                         <div>
-                          {sampleInvoiceData.invoiceNo || "NA"}
+                          {selectedJobIds.length > 1
+                            ? "As Per Annexure"
+                            : sampleInvoiceData.jobNo || "NA"}
                         </div>
-                        <div>
-                          {sampleInvoiceData.date || "NA"}
-                        </div>
-                        <div>
-                          {selectedJobIds.length > 1 ? "As Per Annexure" : (sampleInvoiceData.jobNo || "NA")}
-                        </div>
-                        <div>
-                          {sampleInvoiceData.customerId || "NA"}
-                        </div>
-                        <div>
-                          {sampleInvoiceData.poNo || "NA"}
-                        </div>
+                        <div>{sampleInvoiceData.customerId || "NA"}</div>
+                        <div>{sampleInvoiceData.poNo || "NA"}</div>
                         <div className="break-all">
                           {sampleInvoiceData.irnNo || "NA"}
                         </div>
@@ -2323,7 +3741,7 @@ export default function InvoiceCreationPage() {
               <div className="mb-4">
                 <div className="bg-black text-white px-3 mb-2 py-2 flex justify-between items-center">
                   <span className="font-bold text-xs">
-                    PROFESSIONAL SERVICE CHARGES REGARDING
+                    {billingType === "Reimbursement" ? "PARTICULARS" : "PROFESSIONAL SERVICE CHARGES REGARDING"}
                   </span>
                   <span className="font-bold text-xs">AMOUNT</span>
                 </div>
@@ -2340,11 +3758,19 @@ export default function InvoiceCreationPage() {
                     </div>
                     <div className="col-span-12 md:col-span-2 text-right md:text-right mt-2 md:mt-0 md:flex md:items-start md:justify-end text-xs">
                       {" "}
-                      {parseFloat(
-                        sampleInvoiceData.finalAmount ||
-                          sampleInvoiceData.amount ||
-                          0
-                      ).toFixed(2)}
+                      {billingType === "Reimbursement" && calculations
+                        ? (
+                            parseFloat(calculations.applicationFees || 0) +
+                            parseFloat(calculations.remiCharges || 0) +
+                            (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
+                              ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                              : 0)
+                          ).toFixed(2)
+                        : parseFloat(
+                            sampleInvoiceData.finalAmount ||
+                              sampleInvoiceData.amount ||
+                              0
+                          ).toFixed(2)}
                     </div>
                   </div>
 
@@ -2353,15 +3779,29 @@ export default function InvoiceCreationPage() {
                       {billingFieldNames.length > 0 && firstSelectedJob ? (
                         <div className="space-y-1">
                           {billingFieldNames.map((fieldName, index) => {
-                            const fieldKey = getFieldKey(fieldName);
-                            const fieldValue = firstSelectedJob[fieldKey] || "NA";
+                            // Get field value from JobFieldValue table
+                            const fieldValue =
+                              selectedJobIds.length > 0
+                                ? getFieldValueFromJobFieldValue(
+                                    selectedJobIds[0],
+                                    fieldName,
+                                    jobFieldValuesMap
+                                  ) || "NA"
+                                : "NA";
                             return (
-                              <div key={index} className="grid grid-cols-10 gap-4 text-xs">
+                              <div
+                                key={index}
+                                className="grid grid-cols-10 gap-4 text-xs"
+                              >
                                 <div className="col-span-6">
                                   <span className="text-xs">{fieldName}</span>
                                 </div>
                                 <div className="col-span-4 text-start">
-                                  <span>{selectedJobIds.length > 1 ? "As Per Annexure" : fieldValue}</span>
+                                  <span>
+                                    {selectedJobIds.length > 1
+                                      ? "As Per Annexure"
+                                      : fieldValue}
+                                  </span>
                                 </div>
                               </div>
                             );
@@ -2379,55 +3819,49 @@ export default function InvoiceCreationPage() {
                         <div className="font-semibold text-xs mb-1"></div>
                       )}
                     </div>
-                    <div className="col-span-12 md:col-span-2">
-                    </div>
+                    <div className="col-span-12 md:col-span-2"></div>
                   </div>
 
-
-                    <div className="p-0 mt-4 text-xs">
-                        <span className="font-semibold">CHARGES AS UNDER:</span>{" "}
-                        {/* {sampleInvoiceData.chargesAsUnder || "NA"} */}
-                        {selectedJobIds.length > 0 &&
+                  <div className="p-0 mt-4 text-xs">
+                    <span className="font-semibold">CHARGES AS UNDER:</span>{" "}
+                    {/* {sampleInvoiceData.chargesAsUnder || "NA"} */}
+                    {selectedJobIds.length > 0 &&
                       jobServiceChargesMap[selectedJobIds[0]] &&
-                      jobServiceChargesMap[selectedJobIds[0]].invoice_description && (
+                      jobServiceChargesMap[selectedJobIds[0]]
+                        .invoice_description && (
                         <div className="text-xs mb-1">
-                          {jobServiceChargesMap[selectedJobIds[0]].invoice_description}
+                          {
+                            jobServiceChargesMap[selectedJobIds[0]]
+                              .invoice_description
+                          }
                         </div>
                       )}
-                      </div>
+                  </div>
                 </div>
               </div>
 
               {/* Note Section */}
-              {sampleInvoiceData && (
               <div className="p-3 mb-4 ps-0 border-t border-b border-black">
                 <div className="text-xs">
                   <span className="font-semibold">NOTE :</span>{" "}
-                  {sampleInvoiceData.note || ""}
+                  {sampleInvoiceData?.note || ""}
                 </div>
               </div>
-              )}
 
               {/* Bottom Section: Bank Details (Left) and Charges/Taxes (Right) */}
               <div className="grid grid-cols-2 gap-4 mb-1">
                 {/* Left: Bank Details */}
                 <div className="">
                   <div className="p-0">
-                    <div className="font-bold text-xs pb-1">
-                      BANK Details
-                    </div>
+                    <div className="font-bold text-xs pb-1">BANK Details</div>
                     <div className="text-xs">
-                      <div>{" "}
-                        {sessionAccount?.bank_name || "NA"}
-                      </div>
+                      <div> {sessionAccount?.bank_name || "NA"}</div>
                       <div>
                         <span className="text-xs">Branch - </span>{" "}
                         {sessionAccount?.bank_address || "NA"}
                       </div>
                       <div>
-                        <span className="text-xs">
-                          A/C No.
-                        </span>{" "}
+                        <span className="text-xs">A/C No.</span>{" "}
                         {sessionAccount?.account_no || "NA"}
                       </div>
                       <div>
@@ -2463,96 +3897,24 @@ export default function InvoiceCreationPage() {
                 {/* Right: Charges and Taxes */}
                 <div className="p-1">
                   <div className="text-xs grid grid-cols-12">
-                    {parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) > 0 && (
+                    {billingType !== "Reimbursement" && (
                       <>
-                        <div className="col-span-9">Reward </div>
-                        <div className="col-span-1">₹</div>
-                        <div className="col-span-2 text-right">
-                          {parseFloat(
-                            sampleInvoiceData.rewardDiscountAmount || 0
-                          ).toFixed(2)}
-                        </div>
-                      </>
-                    )}
-                    <div className="col-span-9">Registration/Other Charges </div>
-                    <div className="col-span-1">₹</div>
-                    <div className="col-span-2 text-right">
-                      {parseFloat(
-                        sampleInvoiceData.registrationCharges || 0
-                      ).toFixed(2)}
-                    </div>
-                    <div className="col-span-9">
-                      Arrangement of CA CERT. (
-                      {combinedCaCertCount} Nos) 
-                    </div>
-                    <div className="col-span-1">₹</div>
-                    <div className="col-span-2 text-right">
-                      {parseFloat(sampleInvoiceData.caCharges || 0).toFixed(2)}
-                    </div>
-                    <div className="col-span-9">
-                      Arrangement of CE CERT. (
-                      {combinedCeCertCount} Nos) 
-                    </div>
-                    <div className="col-span-1">₹</div>
-                    <div className="col-span-2 text-right">
-                      {parseFloat(sampleInvoiceData.ceCharges || 0).toFixed(2)}
-                    </div>
-                    <div className="col-span-9 font-semibold">Subtotal </div>
-                    <div className="col-span-1 font-semibold">₹</div>
-                    <div className="col-span-2 text-right font-semibold">
-                      {(
-                        parseFloat(
-                          sampleInvoiceData.finalAmount ||
-                            sampleInvoiceData.amount ||
-                            0
-                        ) +
-                        parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                        parseFloat(sampleInvoiceData.caCharges || 0) +
-                        parseFloat(sampleInvoiceData.ceCharges || 0) +
-                        parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                      ).toFixed(2)}
-                    </div>
-                    {invoiceCalculations && (
-                      <>
-                        <div className="col-span-9">C GST: {invoiceCalculations.cgstRate}% </div>
-                        <div className="col-span-1">₹</div>
-                        <div className="col-span-2 text-right">
-                          {invoiceCalculations.cgstAmount.toFixed(2)}
-                        </div>
-                        <div className="col-span-9">S GST: {invoiceCalculations.sgstRate}% </div>
-                        <div className="col-span-1">₹</div>
-                        <div className="col-span-2 text-right">
-                          {invoiceCalculations.sgstAmount.toFixed(2)}
-                        </div>
-                        <div className="col-span-9">I GST: {invoiceCalculations.igstRate}% </div>
-                        <div className="col-span-1">₹</div>
-                        <div className="col-span-2 text-right">
-                          {invoiceCalculations.igstAmount.toFixed(2)}
-                        </div>
-                        <div className="col-span-12 pt-1 mt-1">
-                          <div className="font-semibold">
-                            Reimbursements
-                          </div>
-                        </div>
-                        <div className="col-span-9">Application Fees </div>
-                        <div className="col-span-1">₹</div>
-                        <div className="col-span-2 text-right">
-                          {invoiceCalculations.applicationFees.toFixed(2)}
-                        </div>
-                        {/* Display remi fields dynamically from job service charges */}
-                        {remiFields.length > 0 && remiFields
-                          .filter(remiField => remiField.charges > 0)
-                          .map((remiField, index) => (
-                            <Fragment key={index}>
-                              <div className="col-span-9">{remiField.description}</div>
-                              <div className="col-span-1">₹</div>
-                              <div className="col-span-2 text-right">
-                                {remiField.charges.toFixed(2)}
-                              </div>
-                            </Fragment>
-                          ))}
+                        {parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) >
+                          0 && (
+                          <>
+                            <div className="col-span-9">Reward </div>
+                            <div className="col-span-1">₹</div>
+                            <div className="col-span-2 text-right">
+                              {parseFloat(
+                                sampleInvoiceData.rewardDiscountAmount || 0
+                              ).toFixed(2)}
+                            </div>
+                          </>
+                        )}
                         {/* Show discount if rewardDiscountAmount is negative and no remi fields exist */}
-                        {parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0 && (
+                        {parseFloat(
+                          sampleInvoiceData.rewardDiscountAmount || 0
+                        ) < 0 && (
                           <>
                             <div className="col-span-9">Discount </div>
                             <div className="col-span-1">₹</div>
@@ -2563,11 +3925,204 @@ export default function InvoiceCreationPage() {
                             </div>
                           </>
                         )}
+                        {parseFloat(sampleInvoiceData.registrationCharges || 0) >
+                          0 && (
+                          <>
+                            <div className="col-span-9">
+                              Registration/Other Charges{" "}
+                            </div>
+                            <div className="col-span-1">₹</div>
+                            <div className="col-span-2 text-right">
+                              {parseFloat(
+                                sampleInvoiceData.registrationCharges || 0
+                              ).toFixed(2)}
+                            </div>
+                          </>
+                        )}
+                        {parseFloat(sampleInvoiceData.caCharges || 0) > 0 && (
+                          <>
+                            <div className="col-span-9">
+                              Arrangement of CA CERT. ({combinedCaCertCount} Nos)
+                            </div>
+                            <div className="col-span-1">₹</div>
+                            <div className="col-span-2 text-right">
+                              {parseFloat(sampleInvoiceData.caCharges || 0).toFixed(
+                                2
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {parseFloat(sampleInvoiceData.ceCharges || 0) > 0 && (
+                          <>
+                            <div className="col-span-9">
+                              Arrangement of CE CERT. ({combinedCeCertCount} Nos)
+                            </div>
+                            <div className="col-span-1">₹</div>
+                            <div className="col-span-2 text-right">
+                              {parseFloat(sampleInvoiceData.ceCharges || 0).toFixed(
+                                2
+                              )}
+                            </div>
+                          </>
+                        )}
+                        <div className="col-span-9 font-semibold">Subtotal </div>
+                        <div className="col-span-1 font-semibold">₹</div>
+                        <div className="col-span-2 text-right font-semibold">
+                          {(
+                            parseFloat(
+                              sampleInvoiceData.finalAmount ||
+                                sampleInvoiceData.amount ||
+                                0
+                            ) +
+                            parseFloat(sampleInvoiceData.registrationCharges || 0) +
+                            parseFloat(sampleInvoiceData.caCharges || 0) +
+                            parseFloat(sampleInvoiceData.ceCharges || 0) +
+                            parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                          ).toFixed(2)}
+                        </div>
+                        {calculations && (
+                          <>
+                            {/* {calculations.cgstAmount > 0 && ( */}
+                              <>
+                                <div className="col-span-9">
+                                  C GST: {calculations.cgstRate}%{" "}
+                                </div>
+                                <div className="col-span-1">₹</div>
+                                <div className="col-span-2 text-right">
+                                  {calculations.cgstAmount.toFixed(2)}
+                                </div>
+                              </>
+                            {/* )} */}
+                            {/* {calculations.sgstAmount > 0 && ( */}
+                              <>
+                                <div className="col-span-9">
+                                  S GST: {calculations.sgstRate}%{" "}
+                                </div>
+                                <div className="col-span-1">₹</div>
+                                <div className="col-span-2 text-right">
+                                  {calculations.sgstAmount.toFixed(2)}
+                                </div>
+                              </>
+                            {/* )} */}
+                            {/* {calculations.igstAmount > 0 && ( */}
+                              <>
+                                <div className="col-span-9">
+                                  I GST: {calculations.igstRate}%{" "}
+                                </div>
+                                <div className="col-span-1">₹</div>
+                                <div className="col-span-2 text-right">
+                                  {calculations.igstAmount.toFixed(2)}
+                                </div>
+                              </>
+                            {/* )} */}
+                          </>
+                        )}
+                      </>
+                    )}
+                    {calculations && (
+                      <>
+                        {billingType !== "Service" && (
+                          <>
+                            <div className="col-span-12 pt-1 mt-1">
+                              <div className="font-semibold">Reimbursements</div>
+                            </div>
+                            {parseFloat(sampleInvoiceData.applicationFees || 0) > 0 && (
+                              <>
+                                <div className="col-span-9">Application Fees </div>
+                                <div className="col-span-1">₹</div>
+                                <div className="col-span-2 text-right">
+                                  {calculations.applicationFees.toFixed(2)}
+                                </div>
+                              </>
+                            )}
+                            {/* Display remi fields dynamically - show remi fields with remi_charges > 0, matching view page display */}
+                            {/* 
+                              remiFields are fetched from 'job_service_charges' database table according to selected job_id
+                              The data is fetched via API endpoint /jobs/:id/service-charges which queries job_service_charges table filtered by job_id
+                              Each remiField contains remi_desc (description) and remi_charges from the job_service_charges table
+                              Display remi_desc with remi_charges according to remi_charges values
+                            */}
+                            {remiFields.length > 0 &&
+                              remiFields
+                                .filter((remiField) => remiField.charges > 0)
+                                .map((remiField, index) => (
+                                  <Fragment key={index}>
+                                    <div className="col-span-9">{remiField.description}</div>
+                                    <div className="col-span-1">₹</div>
+                                    <div className="col-span-2 text-right">
+                                      {remiField.charges.toFixed(2)}
+                                    </div>
+                                  </Fragment>
+                                ))}
+                          </>
+                        )}
+                        
                         <div className="col-span-12 border-t border-black"></div>
-                        <div className="col-span-7 font-bold text-base mt-2">TOTAL </div>
-                        <div className="col-span-1 font-bold text-base mt-2 text-right">₹</div>
+                        <div className="col-span-7 font-bold text-base mt-2">
+                          TOTAL{" "}
+                        </div>
+                        <div className="col-span-1 font-bold text-base mt-2 text-right">
+                          ₹
+                        </div>
                         <div className="col-span-4 font-bold text-base mt-2 text-right">
-                          {invoiceCalculations.total.toFixed(2)}
+                          {(() => {
+                            if (billingType === "Reimbursement") {
+                              // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
+                              return (
+                                parseFloat(calculations.applicationFees || 0) +
+                                parseFloat(calculations.remiCharges || 0) +
+                                (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
+                                  ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                                  : 0)
+                              ).toFixed(2);
+                            } else if (billingType === "Service") {
+                              // For Service: Only Service section fields (Subtotal + GST)
+                              // Calculate subtotal from displayed Service fields
+                              const serviceSubtotal = (
+                                parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
+                                parseFloat(sampleInvoiceData.registrationCharges || 0) +
+                                parseFloat(sampleInvoiceData.caCharges || 0) +
+                                parseFloat(sampleInvoiceData.ceCharges || 0) +
+                                parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                              );
+                              // Add GST amounts
+                              const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
+                              return (serviceSubtotal + gstTotal).toFixed(2);
+                            } else {
+                              // For Service & Reimbursement: Calculate total from displayed values
+                              // Calculate displayed subtotal (same as shown on screen)
+                              const displayedSubtotal = (
+                                parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
+                                parseFloat(sampleInvoiceData.registrationCharges || 0) +
+                                parseFloat(sampleInvoiceData.caCharges || 0) +
+                                parseFloat(sampleInvoiceData.ceCharges || 0) +
+                                parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                              );
+                              
+                              // Add GST amounts (as displayed)
+                              const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
+                              
+                              // Add Application Fees (if displayed)
+                              const displayedApplicationFees = parseFloat(sampleInvoiceData.applicationFees || 0) > 0 
+                                ? (calculations?.applicationFees || 0) 
+                                : 0;
+                              
+                              // Calculate displayed remi charges (only include remi fields that are actually shown)
+                              let displayedRemiCharges = 0;
+                              if (remiFields.length > 0) {
+                                displayedRemiCharges = remiFields
+                                  .filter((remiField) => remiField.charges > 0)
+                                  .reduce((sum, remiField) => {
+                                    return sum + parseFloat(remiField.charges || 0);
+                                  }, 0);
+                              }
+                              
+                              // Calculate total from displayed values
+                              const total = displayedSubtotal + gstTotal + displayedApplicationFees + displayedRemiCharges;
+                              
+                              return total.toFixed(2);
+                            }
+                          })()}
                         </div>
                       </>
                     )}
@@ -2576,11 +4131,69 @@ export default function InvoiceCreationPage() {
               </div>
 
               {/* Total Amount in Words */}
-              {invoiceCalculations && (
+              {calculations && (
                 <div className="p-3 mb-4 ps-0 border-t border-b border-black">
                   <div className="text-xs">
                     <span className="font-semibold">Rs. </span>{" "}
-                    {invoiceCalculations.totalInWords}
+                    {(() => {
+                      let totalAmount = 0;
+                      
+                      if (billingType === "Reimbursement") {
+                        // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
+                        totalAmount =
+                          parseFloat(calculations.applicationFees || 0) +
+                          parseFloat(calculations.remiCharges || 0) +
+                          (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
+                            ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                            : 0);
+                      } else if (billingType === "Service") {
+                        // For Service: Only Service section fields (Subtotal + GST)
+                        // Calculate subtotal from displayed Service fields
+                        const serviceSubtotal = (
+                          parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
+                          parseFloat(sampleInvoiceData.registrationCharges || 0) +
+                          parseFloat(sampleInvoiceData.caCharges || 0) +
+                          parseFloat(sampleInvoiceData.ceCharges || 0) +
+                          parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                        );
+                        // Add GST amounts
+                        const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
+                        totalAmount = serviceSubtotal + gstTotal;
+                      } else {
+                        // For Service & Reimbursement: Calculate total from displayed values
+                        // Calculate displayed subtotal (same as shown on screen)
+                        const displayedSubtotal = (
+                          parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
+                          parseFloat(sampleInvoiceData.registrationCharges || 0) +
+                          parseFloat(sampleInvoiceData.caCharges || 0) +
+                          parseFloat(sampleInvoiceData.ceCharges || 0) +
+                          parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
+                        );
+                        
+                        // Add GST amounts (as displayed)
+                        const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
+                        
+                        // Add Application Fees (if displayed)
+                        const displayedApplicationFees = parseFloat(sampleInvoiceData.applicationFees || 0) > 0 
+                          ? (calculations?.applicationFees || 0) 
+                          : 0;
+                        
+                        // Calculate displayed remi charges (only include remi fields that are actually shown)
+                        let displayedRemiCharges = 0;
+                        if (remiFields.length > 0) {
+                          displayedRemiCharges = remiFields
+                            .filter((remiField) => remiField.charges > 0)
+                            .reduce((sum, remiField) => {
+                              return sum + parseFloat(remiField.charges || 0);
+                            }, 0);
+                        }
+                        
+                        // Calculate total from displayed values
+                        totalAmount = displayedSubtotal + gstTotal + displayedApplicationFees + displayedRemiCharges;
+                      }
+                      
+                      return numberToWords(totalAmount);
+                    })()}
                   </div>
                 </div>
               )}
@@ -2593,20 +4206,25 @@ export default function InvoiceCreationPage() {
                   </span>
                 </div>
               </div>
-              
+
               <div className="text-right">
-                  <span className="font-semibold text-sm">
-                    For {sessionAccount?.account_name || "NA"}
-                  </span>
+                <span className="font-semibold text-sm">
+                  For {sessionAccount?.account_name || "NA"}
+                </span>
               </div>
               <div className="px-3 mb-2">
                 <div className="text-center">
                   <span className="text-xs">
-                    Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune, Ph:+91 20 3511 3202, Website: www.lucrative.co.in As Per Rule 46(q) of GST act 2017 said Invoice is digitally signed
+                    Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK
+                    Market, Bibwewadi, Pune, Ph:+91 20 3511 3202, Website:
+                    www.lucrative.co.in As Per Rule 46(q) of GST act 2017 said
+                    Invoice is digitally signed
                   </span>
                 </div>
               </div>
             </div>
+            );
+            })()}
           </div>
 
           {/* Print Styles */}

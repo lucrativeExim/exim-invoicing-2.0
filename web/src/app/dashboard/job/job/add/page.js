@@ -8,6 +8,8 @@ import accountService from '@/services/accountService';
 import api from '@/services/api';
 import ClientServiceChargeForm from '../components/ClientServiceChargeForm';
 import Modal from '@/components/Modal';
+import Toast from '@/components/Toast';
+import { useToast } from '@/hooks/useToast';
 
 // Helper function to generate a safe key from field name
 const getFieldKey = (fieldName) => {
@@ -74,6 +76,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const router = useRouter();
   const isEditMode = mode === 'edit';
   const { accounts, setAccounts, selectedAccount, selectAccount, setLoading: setAccountLoading } = useAccount();
+  const { toast, success, error: showError, hideToast } = useToast();
   
   const [jobRegisters, setJobRegisters] = useState([]);
   const [selectedJobRegister, setSelectedJobRegister] = useState(null);
@@ -101,6 +104,8 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const [remark, setRemark] = useState('');
   const [clientsLoading, setClientsLoading] = useState(false);
   const [busLoading, setBusLoading] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const hasLoadedFromJobRef = useRef(false); // Track if we've loaded clientServiceCharge from job data in edit mode
   const hasLoadedBasicFieldsRef = useRef(false); // Track if we've loaded basic job fields (jobNo, status, billingType, etc.) in edit mode
@@ -398,11 +403,34 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, initialJobData?.billing_type]);
 
+  // Auto-select and disable Billing Type when Invoice Type is 'Partial Invoice'
+  useEffect(() => {
+    if (invoiceType === 'partial_invoice') {
+      // Automatically set billing type to 'Service_Reimbursement' if not already set
+      if (billingType !== 'Service_Reimbursement') {
+        setBillingType('Service_Reimbursement');
+      }
+    }
+  }, [invoiceType, billingType]);
+
   // Load form data after job register fields are loaded in edit mode
   useEffect(() => {
     if (isEditMode && initialJobData && jobRegisterFields.length > 0 && !fieldsLoading) {
       const job = initialJobData;
       const jobFormData = {};
+      
+      // Create a map of jobFieldValues for quick lookup
+      const jobFieldValuesMap = {};
+      if (job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
+        job.jobFieldValues.forEach(fv => {
+          if (fv.field_name) {
+            const fieldKey = getFieldKey(fv.field_name);
+            if (fieldKey) {
+              jobFieldValuesMap[fieldKey] = fv.field_value;
+            }
+          }
+        });
+      }
       
       // List of date fields in Job model
       const dateFields = [
@@ -435,9 +463,37 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       jobRegisterFields.forEach(field => {
         const fieldKey = getFieldKey(field.name);
         
-        // Check if job has this field as a column
-        // Try direct match first (field key matches column name)
-        if (job.hasOwnProperty(fieldKey) && job[fieldKey] !== null && job[fieldKey] !== undefined) {
+        // First, check jobFieldValues (for dynamic fields stored in JobFieldValue table)
+        if (jobFieldValuesMap.hasOwnProperty(fieldKey) && jobFieldValuesMap[fieldKey] !== null && jobFieldValuesMap[fieldKey] !== undefined) {
+          const value = jobFieldValuesMap[fieldKey];
+          
+          // Handle date fields
+          if (dateFields.includes(fieldKey)) {
+            if (value instanceof Date) {
+              jobFormData[fieldKey] = value.toISOString().split('T')[0];
+            } else if (typeof value === 'string') {
+              const dateValue = new Date(value);
+              if (!isNaN(dateValue.getTime())) {
+                jobFormData[fieldKey] = dateValue.toISOString().split('T')[0];
+              } else {
+                // Try parsing as date string directly
+                jobFormData[fieldKey] = value;
+              }
+            } else {
+              jobFormData[fieldKey] = value;
+            }
+          }
+          // Handle phone number fields (convert Float to string)
+          else if (phoneFields.includes(fieldKey)) {
+            jobFormData[fieldKey] = value.toString();
+          }
+          // Handle regular fields
+          else {
+            jobFormData[fieldKey] = value;
+          }
+        }
+        // Then check if job has this field as a column (for backward compatibility)
+        else if (job.hasOwnProperty(fieldKey) && job[fieldKey] !== null && job[fieldKey] !== undefined) {
           const value = job[fieldKey];
           
           // Handle date fields
@@ -465,22 +521,8 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       // Also map any other job columns that might not be in jobRegisterFields
       // but are valid job columns (for backward compatibility)
       const validJobColumns = [
-        'type_of_unit', 'job_owner', 'job_owner_email_id', 'job_owner_phone_no',
-        'processor', 'processor_email_id', 'processor_phone_no',
-        'port', 'po_no', 'quantity', 'description_of_quantity',
-        'application', 'claim_amount_after_finalization',
-        'appl_fee_duty_paid', 'appl_fees_reference_no',
-        'eft_attachment', 'bank_name', 'application_ref_no',
-        'cac_attachment', 'cec_attachment', 'no_of_cac', 'no_of_cec',
-        'acknowlegment', 'submitted_to', 'file_no',
-        'authorisation_no', 'duty_credit_scrip_no', 'license_no',
-        'certificate_no', 'refund_sanction_order_no', 'brand_rate_letter_no',
-        'lic_scrip_order_cert_amendment_no', 'date',
-        'refund_order_license_approval_brl_certificate_attachment',
-        'duty_credit_refund_sanctioned_exempted_amount',
-        'actual_duty_credit_refund_sanctioned_amount',
-        'normal_retro', 'cus_clearance', 'type_of_ims', 'bis', 'ims', 'scomet',
-        'inv_no', 'dbk_claim_no', 'ref__no',
+        'job_owner_id',
+        'processor_id','job_date',
       ];
       
       validJobColumns.forEach(column => {
@@ -521,7 +563,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     }
   }, [isEditMode, initialJobData, jobRegisterFields, fieldsLoading]);
 
-  // Fetch job registers and accounts on mount
+  // Fetch job registers, accounts, and users on mount
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -538,6 +580,12 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           setAccounts(accountsData.filter(acc => acc.status === 'Active'));
           setAccountLoading(false);
         }
+        
+        // Fetch users
+        setUsersLoading(true);
+        const usersResponse = await api.get('/users');
+        setUsers(usersResponse.data || []);
+        setUsersLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -1148,6 +1196,19 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const mapFormDataToJobFields = (formData, jobRegisterFields) => {
     const mappedData = {};
     
+    // Create a set of dynamic field keys from jobRegisterFields
+    const dynamicFieldKeys = new Set();
+    if (jobRegisterFields && Array.isArray(jobRegisterFields)) {
+      jobRegisterFields.forEach(field => {
+        if (field.name) {
+          const fieldKey = getFieldKey(field.name);
+          if (fieldKey) {
+            dynamicFieldKeys.add(fieldKey);
+          }
+        }
+      });
+    }
+    
     // List of date fields in Job model
     const dateFields = [
       'job_date',
@@ -1175,6 +1236,9 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     // List of phone number fields (stored as Float in database)
     const phoneFields = ['job_owner_phone_no', 'processor_phone_no'];
     
+    // List of ID fields that should be converted to integers
+    const idFields = ['job_owner_id', 'processor_id'];
+    
     // Iterate through form data and map to Job columns
     Object.keys(formData).forEach((fieldKey) => {
       const value = formData[fieldKey];
@@ -1184,23 +1248,36 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         return;
       }
       
+      // Check if this is a dynamic field from jobRegisterFields
+      const isDynamicField = dynamicFieldKeys.has(fieldKey);
+      
+      // Determine the final key (add _dynamic suffix for dynamic fields)
+      const finalKey = isDynamicField ? `${fieldKey}_dynamic` : fieldKey;
+      
       // Handle date fields - DateInput already sends YYYY-MM-DD format
       if (dateFields.includes(fieldKey)) {
         // DateInput sends dates in YYYY-MM-DD format, pass through directly
         // Backend's parseDate function will handle the conversion
-        mappedData[fieldKey] = value;
+        mappedData[finalKey] = value;
       }
       // Handle phone number fields
       else if (phoneFields.includes(fieldKey)) {
         // Parse phone number as float
         const phoneValue = parseFloat(value);
         if (!isNaN(phoneValue)) {
-          mappedData[fieldKey] = phoneValue;
+          mappedData[finalKey] = phoneValue;
+        }
+      }
+      // Handle ID fields - convert to integer
+      else if (idFields.includes(fieldKey)) {
+        const idValue = parseInt(value, 10);
+        if (!isNaN(idValue)) {
+          mappedData[finalKey] = idValue;
         }
       }
       // Handle regular fields
       else {
-        mappedData[fieldKey] = value;
+        mappedData[finalKey] = value;
       }
     });
     
@@ -1211,9 +1288,11 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    console.log('Form submitted!', { selectedJobRegister, selectedClientId, selectedBuId, status, invoiceType, billingType });
+    
     // Validate required fields
     const newErrors = {};
-  const newClientServiceErrors = {};
+    const newClientServiceErrors = {};
     
     if (!selectedJobRegister) {
       newErrors.job_register = 'Please select a Job Code';
@@ -1240,48 +1319,51 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       newErrors.billing_type = 'Please select Billing Type';
     }
     
-  // Remark is optional, no validation needed
+    // Remark is optional, no validation needed
 
-  // ---------------- Client Service Charges Validations ----------------
-  // GST No validation (if provided)
-  const normalizedGst = (gstNo || '').trim().toUpperCase();
-  if (normalizedGst && !GST_REGEX.test(normalizedGst)) {
-    newClientServiceErrors.gst_no = 'Please enter a valid 15-character GST No.';
-  }
-
-  // Phone No validation (if provided) - Indian mobile, 10 digits starting 6-9
-  const rawPhone = (clientServiceChargeFormData.concern_phone_no || '').trim();
-  if (rawPhone) {
-    const digitsOnly = rawPhone.replace(/\D/g, '');
-    if (!INDIAN_MOBILE_REGEX.test(digitsOnly)) {
-      newClientServiceErrors.concern_phone_no = 'Please enter a valid 10-digit Indian mobile number.';
+    // ---------------- Client Service Charges Validations ----------------
+    // GST No validation (if provided)
+    const normalizedGst = (gstNo || '').trim().toUpperCase();
+    if (normalizedGst && !GST_REGEX.test(normalizedGst)) {
+      newClientServiceErrors.gst_no = 'Please enter a valid 15-character GST No.';
     }
-  }
 
-  // Helper to validate numeric fields with up to 2 decimal places
-  const amountFields = [
-    'min',
-    'max',
-    'in_percentage',
-    'fixed',
-    'per_shb',
-    'ca_charges',
-    'ce_charges',
-    'registration_other_charges',
-  ];
-
-  amountFields.forEach((field) => {
-    const value = (clientServiceChargeFormData[field] ?? '').toString().trim();
-    if (value && !TWO_DECIMAL_NUMBER_REGEX.test(value)) {
-      newClientServiceErrors[field] = 'Please enter a valid number with up to 2 decimal places.';
+    // Phone No validation (if provided) - Indian mobile, 10 digits starting 6-9
+    const rawPhone = (clientServiceChargeFormData.concern_phone_no || '').trim();
+    if (rawPhone) {
+      const digitsOnly = rawPhone.replace(/\D/g, '');
+      if (!INDIAN_MOBILE_REGEX.test(digitsOnly)) {
+        newClientServiceErrors.concern_phone_no = 'Please enter a valid 10-digit Indian mobile number.';
+      }
     }
-  });
 
-  if (Object.keys(newErrors).length > 0 || Object.keys(newClientServiceErrors).length > 0) {
-    setErrors(newErrors);
-    setClientServiceErrors(newClientServiceErrors);
-    return;
-  }
+    // Helper to validate numeric fields with up to 2 decimal places
+    const amountFields = [
+      'min',
+      'max',
+      'in_percentage',
+      'fixed',
+      'per_shb',
+      'ca_charges',
+      'ce_charges',
+      'registration_other_charges',
+    ];
+
+    amountFields.forEach((field) => {
+      const value = (clientServiceChargeFormData[field] ?? '').toString().trim();
+      if (value && !TWO_DECIMAL_NUMBER_REGEX.test(value)) {
+        newClientServiceErrors[field] = 'Please enter a valid number with up to 2 decimal places.';
+      }
+    });
+
+    console.log('Validation errors:', { newErrors, newClientServiceErrors });
+
+    if (Object.keys(newErrors).length > 0 || Object.keys(newClientServiceErrors).length > 0) {
+      setErrors(newErrors);
+      setClientServiceErrors(newClientServiceErrors);
+      console.log('Validation failed, returning early');
+      return;
+    }
     
     try {
       setSubmitting(true);
@@ -1369,21 +1451,24 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         const successMessage = successJobNo 
           ? `Job No ${successJobNo} ${isEditMode ? 'updated' : 'saved'} successfully!`
           : `Job ${isEditMode ? 'updated' : 'saved'} successfully!`;
-        alert(successMessage);
+        success(successMessage, 3000);
         
         // In edit mode, redirect based on job status
         if (isEditMode) {
           const jobStatus = status || response.data.status;
           const jobRegisterId = selectedJobRegister?.id || response.data.job_register_id;
           
-          // Redirect to in-process page with job code (for all statuses including Closed)
-          if (jobStatus === 'In_process' || jobStatus === 'In-process') {
-            router.push(`/dashboard/job/job?jobCodeId=${jobRegisterId}`);
-          }
-          // Default: redirect to inprocess page
-          else {
-            router.push(`/dashboard/job/job${jobRegisterId ? `?jobCodeId=${jobRegisterId}` : ''}`);
-          }
+          // Delay redirect to allow toast to be visible
+          setTimeout(() => {
+            // Redirect to in-process page with job code (for all statuses including Closed)
+            if (jobStatus === 'In_process' || jobStatus === 'In-process') {
+              router.push(`/dashboard/job/job?jobCodeId=${jobRegisterId}`);
+            }
+            // Default: redirect to inprocess page
+            else {
+              router.push(`/dashboard/job/job${jobRegisterId ? `?jobCodeId=${jobRegisterId}` : ''}`);
+            }
+          }, 3000);
         } else {
           // In add mode, reset form for new job (preserves job register selection)
           await resetFormForNewJob();
@@ -1392,7 +1477,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     } catch (error) {
       console.error('Error saving job:', error);
       const errorMessage = error.response?.data?.error || 'Error saving job. Please try again.';
-      alert(errorMessage);
+      showError(errorMessage);
     } finally {
       setSubmitting(false);
     }
@@ -1520,6 +1605,16 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
 
   return (
     <div className="space-y-3">
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          duration={toast.duration}
+          onClose={hideToast}
+        />
+      )}
+
       {/* Page Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -1547,7 +1642,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
       {/* Form Card - Only show if job register is selected */}
       {selectedJobRegister ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             {/* Combined Grid: Hardcoded Fields + Dynamic Fields + Additional Fields */}
             {fieldsLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -1673,29 +1768,53 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                   )}
                 </div>
 
-                {/* Type Of Claim - Disabled (Read-only, shows job register name) */}
+                {/* Job Date */}
                 <div>
-                  <Input
-                    label="Type Of Claim"
-                    type="text"
-                    name="type_of_claim"
-                    value={selectedJobRegister.job_code || ''}
-                    disabled
-                    placeholder="Type Of Claim"
-                    required
+                  <DateInput
+                    label="Job Date"
+                    name="job_date"
+                    value={formData.job_date || ''}
+                    onChange={handleFieldChange}
+                    error={errors.job_date}
+                    placeholder="dd/mm/yyyy"
                   />
                 </div>
 
-                {/* Claim No - Disabled (Read-only) */}
+                {/* Job Owner */}
                 <div>
-                  <Input
-                    label="Claim No"
-                    type="text"
-                    name="claim_no"
-                    value={claimNo}
-                    disabled
-                    placeholder="Claim No"
-                    required
+                  <SelectBox
+                    label="Job Owner"
+                    name="job_owner_id"
+                    value={formData.job_owner_id || ''}
+                    onChange={handleFieldChange}
+                    options={users.map(user => ({
+                      value: user.id,
+                      label: `${user.first_name} ${user.last_name}`.trim() || user.email
+                    }))}
+                    error={errors.job_owner_id}
+                    placeholder="Select Job Owner"
+                    isClearable={true}
+                    isSearchable={true}
+                    isLoading={usersLoading}
+                  />
+                </div>
+
+                {/* Processor */}
+                <div>
+                  <SelectBox
+                    label="Processor"
+                    name="processor_id"
+                    value={formData.processor_id || ''}
+                    onChange={handleFieldChange}
+                    options={users.map(user => ({
+                      value: user.id,
+                      label: `${user.first_name} ${user.last_name}`.trim() || user.email
+                    }))}
+                    error={errors.processor_id}
+                    placeholder="Select Processor"
+                    isClearable={true}
+                    isSearchable={true}
+                    isLoading={usersLoading}
                   />
                 </div>
 
@@ -1882,8 +2001,9 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
                     ]}
                     error={errors.billing_type}
                     placeholder="Select"
-                    isClearable={true}
+                    isClearable={invoiceType !== 'partial_invoice'}
                     isSearchable={false}
+                    isDisabled={invoiceType === 'partial_invoice'}
                     required
                   />
                 </div>

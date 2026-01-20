@@ -5,10 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, SelectBox } from '@/components/formComponents';
 import Modal from '@/components/Modal';
 import api from '@/services/api';
+import Toast from '@/components/Toast';
+import { useToast } from '@/hooks/useToast';
 
 export default function JobPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { toast, success, error: showError, warning, hideToast } = useToast();
   const [allJobs, setAllJobs] = useState([]);
   const [jobRegisters, setJobRegisters] = useState([]);
   const [selectedJobCodeId, setSelectedJobCodeId] = useState('');
@@ -206,12 +209,12 @@ export default function JobPage() {
 
     try {
       await api.delete(`/jobs/${jobId}`);
-      alert(`Job No ${jobNo || jobId} deleted successfully!`);
+      success(`Job No ${jobNo || jobId} deleted successfully!`);
       fetchJobs(); // Refresh the job list
     } catch (error) {
       console.error('Error deleting job:', error);
       const errorMessage = error.response?.data?.error || 'Error deleting job. Please try again.';
-      alert(errorMessage);
+      showError(errorMessage);
     }
   };
 
@@ -374,7 +377,7 @@ export default function JobPage() {
           }
         } catch (error) {
           console.error('Error viewing file:', error);
-          alert('Failed to open file. Please try again.');
+          showError('Failed to open file. Please try again.');
         }
       }
     }
@@ -390,7 +393,7 @@ export default function JobPage() {
       const validRows = attachmentRows.filter(row => row.file && row.attachmentType);
       
       if (validRows.length === 0) {
-        alert('Please select at least one attachment type and file.');
+        showError('Please select at least one attachment type and file.');
         return;
       }
       
@@ -404,7 +407,7 @@ export default function JobPage() {
       if (validRows.length > 0) {
         // Don't set Content-Type header - axios will set it automatically with boundary for FormData
         await api.post(`/job-attachments/${selectedJobForAttachment.id}`, formData);
-        alert('Attachments saved successfully!');
+        success('Attachments saved successfully!');
         
         // Refresh existing attachments list
         try {
@@ -422,15 +425,15 @@ export default function JobPage() {
           fetchJobs();
         }
       } else {
-        alert('Please select at least one attachment type and file.');
+        showError('Please select at least one attachment type and file.');
       }
     } catch (error) {
       console.error('Error saving attachments:', error);
       if (error.response?.status === 404) {
-        alert('Job attachments API endpoint is not available yet. Please contact the administrator.');
+        showError('Job attachments API endpoint is not available yet. Please contact the administrator.');
       } else {
         const errorMessage = error.response?.data?.error || 'Error saving attachments. Please try again.';
-        alert(errorMessage);
+        showError(errorMessage);
       }
     }
   };
@@ -438,6 +441,16 @@ export default function JobPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          duration={toast.duration}
+          onClose={hideToast}
+        />
+      )}
+
       {/* Page Header with Controls */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-2 flex-wrap">

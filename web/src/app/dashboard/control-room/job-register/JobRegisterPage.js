@@ -164,6 +164,7 @@ export default function JobRegisterPage({ mode = 'add' }) {
     if (!isEditMode || !jobRegisterId) return;
     
     try {
+      console.log(`[fetchJobRegisterFields] Fetching fields for job register ID: ${jobRegisterId}`);
       const response = await api.get(`/job-register-fields/job-register/${jobRegisterId}/active`);
       const jobRegisterField = response.data;
       
@@ -175,6 +176,15 @@ export default function JobRegisterPage({ mode = 'add' }) {
       // If no active job register field exists, that's okay - use defaults
       if (err.response?.status !== 404) {
         console.error('Error fetching job register fields:', err);
+        console.error('Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status,
+          url: err.config?.url,
+          jobRegisterId: jobRegisterId
+        });
+      } else {
+        console.log(`No active job register field found for job register ID: ${jobRegisterId}`);
       }
       // Set to empty array to indicate no saved data
       setSavedJobRegisterFields([]);
