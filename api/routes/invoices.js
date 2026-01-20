@@ -13,8 +13,8 @@ router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
     
     let invoices;
     
-    // If both invoice_status and invoice_stage_status are provided, use findByStatusAndStage
-    if (invoice_status && invoice_stage_status) {
+    // If both invoice_status and invoice_stage_status are provided (and invoice_stage_status is not empty), use findByStatusAndStage
+    if (invoice_status && invoice_stage_status && invoice_stage_status.trim() !== '') {
       invoices = await Invoice.findByStatusAndStage(invoice_status, invoice_stage_status);
     } else {
       // Otherwise, get all invoices (with optional filtering)
@@ -24,7 +24,7 @@ router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       if (invoice_status) {
         invoices = invoices.filter(inv => inv.invoice_status === invoice_status);
       }
-      if (invoice_stage_status) {
+      if (invoice_stage_status && invoice_stage_status.trim() !== '') {
         invoices = invoices.filter(inv => inv.invoice_stage_status === invoice_stage_status);
       }
     }
@@ -163,10 +163,10 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
 // Update invoice - Only Super Admin and Admin can update
 router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
-    // If shifting to Proforma, add performa_created_by from req.user
+    // If shifting to Proforma, add proforma_created_by from req.user
     const updateData = { ...req.body };
-    if (req.body.invoice_stage_status === 'Performa') {
-      updateData.performa_created_by = req.user.id;
+    if (req.body.invoice_stage_status === 'Proforma') {
+      updateData.proforma_created_by = req.user.id;
     }
 
     const invoice = await Invoice.update(req.params.id, updateData);

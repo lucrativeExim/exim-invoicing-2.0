@@ -74,8 +74,8 @@ model User {
   clientServiceChargesDeleted ClientServiceCharge[] @relation("ClientServiceChargeDeletedBy")
   invoices              Invoice[] @relation("InvoiceAddedBy")
   invoicesCanceled     Invoice[] @relation("InvoiceCanceledBy")
-  invoicesPerformaCreated Invoice[] @relation("InvoicePerformaCreatedBy")
-  invoicesPerformaCanceled Invoice[] @relation("InvoicePerformaCanceledBy")
+  invoicesProformaCreated Invoice[] @relation("InvoiceProformaCreatedBy")
+  invoicesProformaCanceled Invoice[] @relation("InvoiceProformaCanceledBy")
   invoiceSelectedJobs   InvoiceSelectedJob[] @relation("InvoiceSelectedJobCreatedBy")
   invoiceAnnexures      InvoiceAnnexure[] @relation("InvoiceAnnexureCreatedBy")
   invoiceAnnexuresCanceled InvoiceAnnexure[] @relation("InvoiceAnnexureCanceledBy")
@@ -578,7 +578,7 @@ enum ClientServiceChargeStatus {
 model Invoice {
   id                          Int                    @id @default(autoincrement())
   draft_view_id               String?                @db.VarChar(255)
-  performa_view_id             String?                @db.VarChar(255)
+  proforma_view_id             String?                @db.VarChar(255)
   job_register_id              Int?
   billing_type                 String?                @db.VarChar(255)
   invoice_type                 String?               @db.VarChar(255)
@@ -608,22 +608,22 @@ model Invoice {
   canceled_at                  DateTime?             @db.DateTime(0)
   added_by                     Int?
   canceled_by                  Int?
-  performa_created_at          DateTime?             @db.DateTime(0)
-  performa_created_by           Int?
-  performa_canceled_at          DateTime?            @db.DateTime(0)
-  performa_canceled_by          Int?
+  proforma_created_at          DateTime?             @db.DateTime(0)
+  proforma_created_by           Int?
+  proforma_canceled_at          DateTime?            @db.DateTime(0)
+  proforma_canceled_by          Int?
   credit_debit_note_number      String?               @db.VarChar(255)
 
   jobRegister                  JobRegister?          @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   addedByUser                  User?                 @relation("InvoiceAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   canceledByUser               User?                 @relation("InvoiceCanceledBy", fields: [canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  performaCreatedByUser         User?                 @relation("InvoicePerformaCreatedBy", fields: [performa_created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  performaCanceledByUser        User?                 @relation("InvoicePerformaCanceledBy", fields: [performa_canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  proformaCreatedByUser         User?                 @relation("InvoiceProformaCreatedBy", fields: [proforma_created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  proformaCanceledByUser        User?                 @relation("InvoiceProformaCanceledBy", fields: [proforma_canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   invoiceSelectedJobs          InvoiceSelectedJob[]
   invoiceAnnexures             InvoiceAnnexure[]
 
   @@index([draft_view_id], name: "idx_draft_view_id")
-  @@index([performa_view_id], name: "idx_performa_view_id")
+  @@index([proforma_view_id], name: "idx_proforma_view_id")
   @@index([job_register_id], name: "idx_job_register_id")
   @@index([po_no], name: "idx_po_no")
   @@index([irn_no], name: "idx_irn_no")
@@ -633,8 +633,8 @@ model Invoice {
   @@index([created_at], name: "idx_created_at")
   @@index([added_by], name: "idx_added_by")
   @@index([canceled_by], name: "idx_canceled_by")
-  @@index([performa_created_by], name: "idx_performa_created_by")
-  @@index([performa_canceled_by], name: "idx_performa_canceled_by")
+  @@index([proforma_created_by], name: "idx_proforma_created_by")
+  @@index([proforma_canceled_by], name: "idx_proforma_canceled_by")
   @@map("invoices")
 }
 
@@ -651,7 +651,7 @@ enum InvoiceStatusEnum {
 
 enum InvoiceStageStatus {
   Draft
-  Performa
+  Proforma
   Canceled
 }
 

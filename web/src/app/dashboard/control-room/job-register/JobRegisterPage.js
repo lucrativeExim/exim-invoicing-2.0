@@ -102,10 +102,10 @@ export default function JobRegisterPage({ mode = 'add' }) {
   // Edit mode with saved data is handled in loadSavedFieldsConfiguration
   useEffect(() => {
     if (!isEditMode && fieldsMaster.length > 0 && Object.keys(selectedFields).length > 0 && arrangeFormOrder.length === 0) {
-      // Only for NEW job registers - sort alphabetically by field name (ASC order)
+      // Only for NEW job registers - sort by ID in ascending order (ASC order)
       const activeFields = fieldsMaster
         .filter(field => selectedFields[field.id] || field.default_value === true)
-        .sort((a, b) => (a.field_name || '').localeCompare(b.field_name || ''))
+        .sort((a, b) => (a.id || 0) - (b.id || 0))
         .map(field => field.id);
       
       setArrangeFormOrder(activeFields);
@@ -202,7 +202,12 @@ export default function JobRegisterPage({ mode = 'add' }) {
       const initialMailSubjects = {};
       const initialMailBodies = {};
       const initialYesFieldsOrder = [];
-      fieldsMaster.forEach((field) => {
+      const initialArrangeFormOrder = [];
+      
+      // Sort fields by ID in ascending order for initial display
+      const sortedFields = [...fieldsMaster].sort((a, b) => (a.id || 0) - (b.id || 0));
+      
+      sortedFields.forEach((field) => {
         const isSelected = field.default_value === true;
         initialSelectedFields[field.id] = isSelected;
         initialMailTemplateFields[field.id] = 'no';
@@ -211,10 +216,14 @@ export default function JobRegisterPage({ mode = 'add' }) {
         initialMailBodies[field.id] = '';
         if (isSelected) {
           initialYesFieldsOrder.push(field.id);
+          initialArrangeFormOrder.push(field.id);
         }
       });
+      
       setSelectedFields(initialSelectedFields);
       setYesFieldsOrder(initialYesFieldsOrder);
+      setArrangeFormOrder(initialArrangeFormOrder);
+      setInitialArrangeFormOrder(initialArrangeFormOrder);
       setMailTemplateFields(initialMailTemplateFields);
       setBillingFields(initialBillingFields);
       setMailSubjects(initialMailSubjects);
@@ -815,15 +824,15 @@ export default function JobRegisterPage({ mode = 'add' }) {
     ];
     
     // Sort fields by Use Field status: Yes first (at top), then No (at bottom)
-    // Both groups sorted alphabetically (ASC), newly changed Yes fields appear at bottom of Yes section
+    // Both groups sorted by ID in ascending order (ASC), newly changed Yes fields appear at bottom of Yes section
     const sortedFields = (() => {
       // Separate fields into Yes and No groups
-      const existingYesFields = []; // Fields that were already Yes (sorted alphabetically)
+      const existingYesFields = []; // Fields that were already Yes (sorted by ID ASC)
       const newYesFields = []; // Fields newly changed to Yes (appear at bottom)
       const noFields = [];
       
-      // Sort alphabetically helper
-      const sortByName = (a, b) => (a.field_name || '').localeCompare(b.field_name || '');
+      // Sort by ID in ascending order helper
+      const sortById = (a, b) => (a.id || 0) - (b.id || 0);
       
       fieldsMaster.forEach((field) => {
         const isSelected = selectedFields[field.id] || field.default_value === true;
@@ -837,7 +846,7 @@ export default function JobRegisterPage({ mode = 'add' }) {
             // Keep track of order - fields added later appear at the end
             existingYesFields.push({ field, orderIndex: yesFieldsOrder.indexOf(field.id) });
           } else {
-            // Default Yes fields (sorted alphabetically at top)
+            // Default Yes fields (sorted by ID ASC at top)
             existingYesFields.push({ field, orderIndex: -1 });
           }
         } else {
@@ -845,18 +854,18 @@ export default function JobRegisterPage({ mode = 'add' }) {
         }
       });
       
-      // Sort existing Yes fields: first by orderIndex (default fields first), then alphabetically within same order
+      // Sort existing Yes fields: first by orderIndex (default fields first), then by ID ASC within same order
       existingYesFields.sort((a, b) => {
         if (a.orderIndex === -1 && b.orderIndex === -1) {
-          return sortByName(a.field, b.field);
+          return sortById(a.field, b.field);
         }
         if (a.orderIndex === -1) return -1;
         if (b.orderIndex === -1) return -1;
         return a.orderIndex - b.orderIndex;
       });
       
-      // Sort No fields alphabetically
-      noFields.sort(sortByName);
+      // Sort No fields by ID in ascending order
+      noFields.sort(sortById);
       
       // Return Yes fields first, then No fields
       return [...existingYesFields.map(item => item.field), ...noFields];
@@ -1020,7 +1029,7 @@ export default function JobRegisterPage({ mode = 'add' }) {
               <tbody className="bg-white divide-y divide-gray-200">
                 {sortedFields.map((field) => {
                   const isDefault = field.default_value === true;
-                  const isSelected = selectedFields[field.id] || false;
+                  const isSelected = selectedFields[field.id] || field.default_value === true;
                   const useFieldValue = isSelected ? 'yes' : 'no';
                   const hasMailTemplate = hasTextToMailTreatment(field.treatment);
                   const mailTemplateValue = mailTemplateFields[field.id] || 'no';

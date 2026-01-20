@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, Fragment, useRef } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { SelectBox } from "@/components/formComponents";
 import api from "@/services/api";
 import { useAccount } from "@/context/AccountContext";
@@ -65,6 +66,7 @@ const getFieldValueFromJobFieldValue = (
 };
 
 export default function InvoiceCreationPage() {
+  const router = useRouter();
   const { selectedAccount: sessionAccount, loading: accountLoading } =
     useAccount();
   const [jobCodes, setJobCodes] = useState([]);
@@ -2235,8 +2237,8 @@ export default function InvoiceCreationPage() {
         alert("Invoice saved successfully!");
         // Optionally close the sample invoice modal
         setShowSampleInvoice(false);
-        // Optionally reset form or redirect
-        // You can add navigation or reset logic here
+        // Redirect to invoices page with draft type filter
+        router.push("/dashboard/invoice/invoices?type=draft");
       }
     } catch (error) {
       console.error("Error saving invoice:", error);

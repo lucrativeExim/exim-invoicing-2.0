@@ -161,7 +161,7 @@ export default function InvoiceViewPage() {
   const [isUpdatingNote, setIsUpdatingNote] = useState(false);
   const [isShiftingToProforma, setIsShiftingToProforma] = useState(false);
 
-  // Lock body scroll when invoice is displayed (Draft/Performa Invoice)
+  // Lock body scroll when invoice is displayed (Draft/Proforma Invoice)
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     // Cleanup on unmount
@@ -473,13 +473,13 @@ export default function InvoiceViewPage() {
     };
   }, [invoice, gstRates, gstType, remiFields, jobFieldValuesMap]);
 
-  // Format date (use performa_created_at for Performa Invoice, created_at for Draft Invoice)
+  // Format date (use proforma_created_at for Proforma Invoice, created_at for Draft Invoice)
   const invoiceDate = useMemo(() => {
     if (!invoice) return "NA";
-    // For Performa Invoice, use performa_created_at if available, otherwise fallback to created_at
+    // For Proforma Invoice, use proforma_created_at if available, otherwise fallback to created_at
     let dateToUse = null;
-    if (invoice.invoice_stage_status === "Performa" && invoice.performa_created_at) {
-      dateToUse = invoice.performa_created_at;
+    if (invoice.invoice_stage_status === "Proforma" && invoice.proforma_created_at) {
+      dateToUse = invoice.proforma_created_at;
     } else if (invoice.created_at) {
       dateToUse = invoice.created_at;
     }
@@ -493,21 +493,21 @@ export default function InvoiceViewPage() {
     return `${day}-${month}-${year}`;
   }, [invoice]);
 
-  // Get invoice number (performa_view_id for Performa Invoice, draft_view_id for Draft Invoice)
+  // Get invoice number (proforma_view_id for Proforma Invoice, draft_view_id for Draft Invoice)
   const invoiceNumber = useMemo(() => {
     if (!invoice) return "NA";
-    // For Performa Invoice, prioritize performa_view_id
-    if (invoice.invoice_stage_status === "Performa") {
-      return invoice.performa_view_id || invoice.draft_view_id || "NA";
+    // For Proforma Invoice, prioritize proforma_view_id
+    if (invoice.invoice_stage_status === "Proforma") {
+      return invoice.proforma_view_id || invoice.draft_view_id || "NA";
     }
     // For Draft Invoice, use draft_view_id
-    return invoice.draft_view_id || invoice.performa_view_id || "NA";
+    return invoice.draft_view_id || invoice.proforma_view_id || "NA";
   }, [invoice]);
 
   // Get invoice type label
   const invoiceTypeLabel = useMemo(() => {
     if (!invoice) return "Invoice";
-    return invoice.invoice_stage_status === "Draft" ? "Draft Invoice" : "Performa Invoice";
+    return invoice.invoice_stage_status === "Draft" ? "Draft Invoice" : "Proforma Invoice";
   }, [invoice]);
 
   // Handle PO No modal open
@@ -633,7 +633,7 @@ export default function InvoiceViewPage() {
     try {
       setIsShiftingToProforma(true);
       await api.put(`/invoices/${invoiceId}`, {
-        invoice_stage_status: "Performa",
+        invoice_stage_status: "Proforma",
       });
 
       // Refresh invoice data
@@ -641,6 +641,8 @@ export default function InvoiceViewPage() {
       setInvoice(response.data);
       
       alert("Invoice shifted to Proforma successfully!");
+      // Redirect to invoices page with draft type filter
+      router.push("/dashboard/invoice/invoices?type=draft");
     } catch (error) {
       console.error("Error shifting invoice to Proforma:", error);
       alert("Failed to shift invoice to Proforma. Please try again.");
@@ -848,7 +850,7 @@ export default function InvoiceViewPage() {
                       </button>
                     </div>
                     <div className="hidden print:block">PO No :</div>
-                    {invoice?.invoice_stage_status === "Performa" ? (
+                    {invoice?.invoice_stage_status === "Proforma" ? (
                       <>
                         <div className="print:hidden">
                           <button

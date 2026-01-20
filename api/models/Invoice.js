@@ -87,7 +87,7 @@ class InvoiceModel {
   }
 
   /**
-   * Generate performa_view_id in format: P{account_id}{year_pair}{sequence}
+   * Generate proforma_view_id in format: P{account_id}{year_pair}{sequence}
    * Format: P + account_id + (last_2_digits_of_current_year + last_2_digits_of_next_year) + 4-digit sequence
    * Year pair updates on April 1st each year
    * Sequence resets to 0001 on April 1st for each account
@@ -97,9 +97,9 @@ class InvoiceModel {
    * - P226270001 (Account 2, year 2627 (2026-2027), sequence 0001)
    * - P124250001 (Account 1, year 2425 (2024-2025), sequence 0001)
    */
-  async generatePerformaViewId(accountId) {
+  async generateProformaViewId(accountId) {
     if (!accountId) {
-      throw new Error('account_id is required to generate performa_view_id');
+      throw new Error('account_id is required to generate proforma_view_id');
     }
 
     const now = new Date();
@@ -123,14 +123,14 @@ class InvoiceModel {
     }
 
     // Find the highest sequence number for this account and year pair
-    // Look for invoices with performa_view_id matching pattern: P{account_id}{year_pair}*
+    // Look for invoices with proforma_view_id matching pattern: P{account_id}{year_pair}*
     const pattern = `P${accountId}${yearPair}`;
     
-    // Query invoices with performa_view_id that might match the pattern
+    // Query invoices with proforma_view_id that might match the pattern
     // We'll filter in JavaScript to ensure we get exact matches
     const existingInvoices = await prisma.invoice.findMany({
       where: {
-        performa_view_id: {
+        proforma_view_id: {
           not: null,
         },
         invoice_status: {
@@ -138,21 +138,21 @@ class InvoiceModel {
         },
       },
       select: {
-        performa_view_id: true,
+        proforma_view_id: true,
       },
     });
 
     // Filter invoices that match the pattern (P + account_id + year_pair)
     const matchingInvoices = existingInvoices.filter((invoice) => {
-      return invoice.performa_view_id && invoice.performa_view_id.startsWith(pattern);
+      return invoice.proforma_view_id && invoice.proforma_view_id.startsWith(pattern);
     });
 
     // Extract sequence numbers and find the maximum
     let maxSequence = 0;
     matchingInvoices.forEach((invoice) => {
-      if (invoice.performa_view_id) {
+      if (invoice.proforma_view_id) {
         // Extract the last 4 digits (sequence)
-        const sequenceStr = invoice.performa_view_id.slice(-4);
+        const sequenceStr = invoice.proforma_view_id.slice(-4);
         const sequence = parseInt(sequenceStr, 10);
         if (!isNaN(sequence) && sequence > maxSequence) {
           maxSequence = sequence;
@@ -164,10 +164,10 @@ class InvoiceModel {
     const nextSequence = maxSequence + 1;
     const sequenceStr = String(nextSequence).padStart(4, '0');
 
-    // Generate performa_view_id: P + account_id + year_pair + sequence
-    const performaViewId = `P${accountId}${yearPair}${sequenceStr}`;
+    // Generate proforma_view_id: P + account_id + year_pair + sequence
+    const proformaViewId = `P${accountId}${yearPair}${sequenceStr}`;
 
-    return performaViewId;
+    return proformaViewId;
   }
 
   /**
@@ -178,7 +178,20 @@ class InvoiceModel {
       includeDeleted = false,
     } = options;
 
-    const where = includeDeleted ? {} : { invoice_status: { not: 'Delete' } };
+    // Build where clause - exclude deleted invoices and filter out empty string invoice_stage_status
+    // Empty strings cause Prisma enum validation errors, so we only include valid enum values or null
+    const where = {};
+    
+    if (!includeDeleted) {
+      where.invoice_status = { not: 'Delete' };
+    }
+    
+    // Filter out records with empty string invoice_stage_status (causes Prisma enum errors)
+    // Include only records with valid enum values or null
+    where.OR = [
+      { invoice_stage_status: null },
+      { invoice_stage_status: { in: ['Draft', 'Proforma', 'Canceled'] } },
+    ];
 
     return await prisma.invoice.findMany({
       where,
@@ -457,12 +470,12 @@ class InvoiceModel {
       status,
       invoice_status,
       invoice_stage_status,
-      performa_created_by,
+      proforma_created_by,
     } = data;
 
-    // If shifting to Proforma, generate performa_view_id
-    let performaViewId = null;
-    if (invoice_stage_status === 'Performa') {
+    // If shifting to Proforma, generate proforma_view_id
+    let proformaViewId = null;
+    if (invoice_stage_status === 'Proforma') {
       // First, fetch the invoice to get account_id from jobs
       const existingInvoice = await prisma.invoice.findUnique({
         where: { id: parseInt(id) },
@@ -489,18 +502,18 @@ class InvoiceModel {
           }
         }
 
-        // Only generate performa_view_id if account_id is found and performa_view_id doesn't exist
-        if (accountId && !existingInvoice.performa_view_id) {
+        // Only generate proforma_view_id if account_id is found and proforma_view_id doesn't exist
+        if (accountId && !existingInvoice.proforma_view_id) {
           try {
-            performaViewId = await this.generatePerformaViewId(parseInt(accountId));
-            console.log(`Generated performa_view_id: ${performaViewId} for account_id: ${accountId}`);
+            proformaViewId = await this.generateProformaViewId(parseInt(accountId));
+            console.log(`Generated proforma_view_id: ${proformaViewId} for account_id: ${accountId}`);
           } catch (error) {
-            console.error('Error generating performa_view_id:', error);
-            // Continue without performa_view_id if generation fails
+            console.error('Error generating proforma_view_id:', error);
+            // Continue without proforma_view_id if generation fails
           }
-        } else if (existingInvoice.performa_view_id) {
-          // If performa_view_id already exists, keep it
-          performaViewId = existingInvoice.performa_view_id;
+        } else if (existingInvoice.proforma_view_id) {
+          // If proforma_view_id already exists, keep it
+          proformaViewId = existingInvoice.proforma_view_id;
         }
       }
     }
@@ -533,16 +546,16 @@ class InvoiceModel {
       ...(invoice_stage_status !== undefined && { invoice_stage_status }),
     };
 
-    // Add performa_view_id if generated
-    if (performaViewId !== null) {
-      updateData.performa_view_id = performaViewId;
+    // Add proforma_view_id if generated
+    if (proformaViewId !== null) {
+      updateData.proforma_view_id = proformaViewId;
     }
 
-    // Set performa_created_at and performa_created_by when shifting to Proforma
-    if (invoice_stage_status === 'Performa') {
-      updateData.performa_created_at = getISTDateTime();
-      if (performa_created_by !== undefined) {
-        updateData.performa_created_by = performa_created_by ? parseInt(performa_created_by) : null;
+    // Set proforma_created_at and proforma_created_by when shifting to Proforma
+    if (invoice_stage_status === 'Proforma') {
+      updateData.proforma_created_at = getISTDateTime();
+      if (proforma_created_by !== undefined) {
+        updateData.proforma_created_by = proforma_created_by ? parseInt(proforma_created_by) : null;
       }
     }
 

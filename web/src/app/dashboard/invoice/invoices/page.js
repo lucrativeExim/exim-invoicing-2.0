@@ -15,13 +15,13 @@ export default function InvoicesPage() {
 
   const invoiceTypeOptions = [
     { value: 'draft', label: 'Draft Invoice' },
-    { value: 'performa', label: 'Performa Invoice' },
+    { value: 'proforma', label: 'Proforma Invoice' },
   ];
 
   // Initialize invoice type from URL params on mount
   useEffect(() => {
     const typeFromUrl = searchParams.get('type');
-    if (typeFromUrl && (typeFromUrl === 'draft' || typeFromUrl === 'performa')) {
+    if (typeFromUrl && (typeFromUrl === 'draft' || typeFromUrl === 'proforma')) {
       setInvoiceType(typeFromUrl);
     }
   }, [searchParams]);
@@ -32,7 +32,7 @@ export default function InvoicesPage() {
     
     // Update URL with selected invoice type
     const params = new URLSearchParams(searchParams.toString());
-    if (selectedValue && (selectedValue === 'draft' || selectedValue === 'performa')) {
+    if (selectedValue && (selectedValue === 'draft' || selectedValue === 'proforma')) {
       params.set('type', selectedValue);
     } else {
       params.delete('type');
@@ -51,20 +51,23 @@ export default function InvoicesPage() {
       setLoading(true);
       try {
         let invoiceStatus = 'Active';
-        let invoiceStageStatus = '';
+        let invoiceStageStatus = null;
 
         if (invoiceType === 'draft') {
           invoiceStageStatus = 'Draft';
-        } else if (invoiceType === 'performa') {
-          invoiceStageStatus = 'Performa';
+        } else if (invoiceType === 'proforma') {
+          invoiceStageStatus = 'Proforma';
         }
 
-        const response = await api.get('/invoices', {
-          params: {
-            invoice_status: invoiceStatus,
-            invoice_stage_status: invoiceStageStatus,
-          },
-        });
+        // Build params object, only include invoice_stage_status if it has a value
+        const params = {
+          invoice_status: invoiceStatus,
+        };
+        if (invoiceStageStatus) {
+          params.invoice_stage_status = invoiceStageStatus;
+        }
+
+        const response = await api.get('/invoices', { params });
 
         setInvoices(response.data || []);
       } catch (error) {
@@ -119,7 +122,7 @@ export default function InvoicesPage() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900">
-                {invoiceType === 'draft' ? 'Draft Invoices' : 'Performa Invoices'}
+                {invoiceType === 'draft' ? 'Draft Invoices' : 'Proforma Invoices'}
               </h2>
             </div>
             {loading ? (
@@ -138,7 +141,7 @@ export default function InvoicesPage() {
                         View
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {invoiceType === 'draft' ? 'Draft ID' : 'Performa ID'}
+                        {invoiceType === 'draft' ? 'Draft ID' : 'Proforma ID'}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Job Register
@@ -163,33 +166,14 @@ export default function InvoicesPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           <button
                             onClick={() => handleViewInvoice(invoice.id)}
-                            className="text-blue-600 hover:text-blue-800 transition-colors"
+                            className="px-2 py-1 text-xs font-medium text-cyan-700 bg-cyan-200 hover:bg-cyan-300 rounded shadow-sm hover:shadow transition-all duration-200"
                             title="View Invoice"
                           >
-                            <svg
-                              className="w-5 h-5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                              />
-                            </svg>
+                            View
                           </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {invoiceType === 'draft' ? invoice.draft_view_id || '-' : invoice.performa_view_id || '-'}
+                          {invoiceType === 'draft' ? invoice.draft_view_id || '-' : invoice.proforma_view_id || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {invoice.jobRegister?.job_code || '-'}
