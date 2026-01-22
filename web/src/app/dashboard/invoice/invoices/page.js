@@ -174,6 +174,9 @@ export default function InvoicesPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        SR.NO.
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         View
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -197,8 +200,11 @@ export default function InvoicesPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {pagination.paginatedData.map((invoice) => (
+                    {pagination.paginatedData.map((invoice, index) => (
                       <tr key={invoice.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {(pagination.currentPage - 1) * pagination.itemsPerPage + index + 1}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           <button
                             onClick={() => handleViewInvoice(invoice.id)}

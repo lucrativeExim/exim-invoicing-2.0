@@ -118,7 +118,7 @@ class JobModel {
       where.invoice_type = invoiceType;
     }
 
-    return await prisma.job.findMany({
+    const jobs = await prisma.job.findMany({
       where,
       include: {
         jobRegister: {
@@ -167,8 +167,49 @@ class JobModel {
         jobFieldValues: {
           orderBy: { field_name: 'asc' },
         },
+        invoiceSelectedJobs: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                invoice_status: true,
+                invoice_stage_status: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
+    });
+
+    // Add canDelete, canEdit, and canAddAttachment flags to each job
+    // A job cannot be deleted if it exists in invoice_selected_jobs 
+    // with an invoice that has invoice_status = 'Active' AND (invoice_stage_status = 'Draft' OR invoice_stage_status = 'Proforma')
+    // A job cannot be edited or have attachments added if it exists in invoice_selected_jobs 
+    // with an invoice that has invoice_status = 'Active' AND invoice_stage_status = 'Proforma'
+    return jobs.map(job => {
+      const hasActiveDraftInvoice = job.invoiceSelectedJobs.some(
+        isj => isj.invoice && 
+               isj.invoice.invoice_status === 'Active' && 
+               isj.invoice.invoice_stage_status === 'Draft'
+      );
+      
+      const hasActiveProformaInvoice = job.invoiceSelectedJobs.some(
+        isj => isj.invoice && 
+               isj.invoice.invoice_status === 'Active' && 
+               isj.invoice.invoice_stage_status === 'Proforma'
+      );
+      
+      const canDelete = !hasActiveDraftInvoice && !hasActiveProformaInvoice;
+      const canEdit = !hasActiveProformaInvoice;
+      const canAddAttachment = !hasActiveProformaInvoice;
+      
+      return {
+        ...job,
+        canDelete,
+        canEdit,
+        canAddAttachment,
+      };
     });
   }
 

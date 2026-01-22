@@ -378,7 +378,7 @@ model Job {
 
 // Job Field Value - Stores dynamic form field values for jobs
 model JobFieldValue {
-  id          Int       @id @default(autoincrement())
+  id          BigInt    @id @default(autoincrement())
   job_id      Int
   field_name  String    @db.VarChar(255)
   field_value String?   @db.Text
