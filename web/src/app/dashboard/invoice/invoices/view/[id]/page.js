@@ -7,6 +7,7 @@ import api from "@/services/api";
 import { useAccount } from "@/context/AccountContext";
 import logoImage from "@/assets/images/invoice-logo.png";
 import Modal from "@/components/Modal";
+import { Button } from "@/components/formComponents";
 
 // Helper function to convert field name to database column name
 const getFieldKey = (fieldName) => {
@@ -391,9 +392,10 @@ export default function InvoiceViewPage() {
     const registrationCharges = parseFloat(invoice.registration_other_charges || 0);
     const caCharges = parseFloat(invoice.ca_charges || 0);
     const ceCharges = parseFloat(invoice.ce_charges || 0);
-    const rewardDiscountAmount = parseFloat(invoice.reward_penalty_amount || 0);
+    const rewardAmount = parseFloat(invoice.reward_amount || 0);
+    const discountAmount = parseFloat(invoice.discount_amount || 0);
     
-    const subtotal = baseAmount + registrationCharges + caCharges + ceCharges + rewardDiscountAmount;
+    const subtotal = baseAmount + registrationCharges + caCharges + ceCharges + rewardAmount - discountAmount;
     
     const baseCgstRate = gstRates.cgstRate || 0;
     const baseSgstRate = gstRates.sgstRate || 0;
@@ -741,12 +743,13 @@ export default function InvoiceViewPage() {
           >
             ← Back
           </button>
-          <button
+          <Button
+            type="button"
+            variant="secondary"
             onClick={() => router.back()}
-            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
           >
             Cancel
-          </button>
+          </Button>
         </div>
         
         <div className="flex justify-center">
@@ -906,10 +909,8 @@ export default function InvoiceViewPage() {
                   {invoice.billing_type === "Reimbursement" && invoiceCalculations ? (
                     (
                       parseFloat(invoiceCalculations.applicationFees || 0) +
-                      parseFloat(invoiceCalculations.remiCharges || 0) +
-                      (parseFloat(invoice.reward_penalty_amount || 0) < 0
-                        ? parseFloat(invoice.reward_penalty_amount || 0)
-                        : 0)
+                      parseFloat(invoiceCalculations.remiCharges || 0) -
+                      parseFloat(invoice.discount_amount || 0)
                     ).toFixed(2)
                   ) : (
                     parseFloat(invoice.amount || 0).toFixed(2)
@@ -1026,21 +1027,21 @@ export default function InvoiceViewPage() {
               <div className="text-xs grid grid-cols-12">
                 {invoice.billing_type !== "Reimbursement" && (
                   <>
-                    {parseFloat(invoice.reward_penalty_amount || 0) > 0 && (
+                    {parseFloat(invoice.reward_amount || 0) > 0 && (
                       <>
                         <div className="col-span-9">Reward </div>
                         <div className="col-span-1">₹</div>
                         <div className="col-span-2 text-right">
-                          {parseFloat(invoice.reward_penalty_amount || 0).toFixed(2)}
+                          {parseFloat(invoice.reward_amount || 0).toFixed(2)}
                         </div>
                       </>
                     )}
-                    {parseFloat(invoice.reward_penalty_amount || 0) < 0 && (
+                    {parseFloat(invoice.discount_amount || 0) > 0 && (
                       <>
                         <div className="col-span-9">Discount </div>
                         <div className="col-span-1">₹</div>
                         <div className="col-span-2 text-right">
-                          {parseFloat(invoice.reward_penalty_amount || 0).toFixed(2)}
+                          {parseFloat(invoice.discount_amount || 0).toFixed(2)}
                         </div>
                       </>
                     )}
@@ -1083,7 +1084,8 @@ export default function InvoiceViewPage() {
                         parseFloat(invoice.registration_other_charges || 0) +
                         parseFloat(invoice.ca_charges || 0) +
                         parseFloat(invoice.ce_charges || 0) +
-                        parseFloat(invoice.reward_penalty_amount || 0)
+                        parseFloat(invoice.reward_amount || 0) -
+                        parseFloat(invoice.discount_amount || 0)
                       ).toFixed(2)}
                     </div>
                     {invoiceCalculations && (
@@ -1144,13 +1146,11 @@ export default function InvoiceViewPage() {
                     <div className="col-span-4 font-bold text-base mt-2 text-right">
                       {(() => {
                         if (invoice.billing_type === "Reimbursement") {
-                          // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
+                          // For Reimbursement: Application Fees + Remi Charges - Discount
                           return (
                             parseFloat(invoiceCalculations.applicationFees || 0) +
-                            parseFloat(invoiceCalculations.remiCharges || 0) +
-                            (parseFloat(invoice.reward_penalty_amount || 0) < 0
-                              ? parseFloat(invoice.reward_penalty_amount || 0)
-                              : 0)
+                            parseFloat(invoiceCalculations.remiCharges || 0) -
+                            parseFloat(invoice.discount_amount || 0)
                           ).toFixed(2);
                         } else if (invoice.billing_type === "Service") {
                           // For Service: Only Service section fields (Subtotal + GST)
@@ -1160,7 +1160,8 @@ export default function InvoiceViewPage() {
                             parseFloat(invoice.registration_other_charges || 0) +
                             parseFloat(invoice.ca_charges || 0) +
                             parseFloat(invoice.ce_charges || 0) +
-                            parseFloat(invoice.reward_penalty_amount || 0)
+                            parseFloat(invoice.reward_amount || 0) -
+                            parseFloat(invoice.discount_amount || 0)
                           );
                           // Add GST amounts
                           const gstTotal = (invoiceCalculations?.cgstAmount || 0) + (invoiceCalculations?.sgstAmount || 0) + (invoiceCalculations?.igstAmount || 0);
@@ -1187,13 +1188,11 @@ export default function InvoiceViewPage() {
                   let totalAmount = 0;
                   
                   if (invoice.billing_type === "Reimbursement") {
-                    // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
+                    // For Reimbursement: Application Fees + Remi Charges - Discount
                     totalAmount =
                       parseFloat(invoiceCalculations.applicationFees || 0) +
-                      parseFloat(invoiceCalculations.remiCharges || 0) +
-                      (parseFloat(invoice.reward_penalty_amount || 0) < 0
-                        ? parseFloat(invoice.reward_penalty_amount || 0)
-                        : 0);
+                      parseFloat(invoiceCalculations.remiCharges || 0) -
+                      parseFloat(invoice.discount_amount || 0);
                   } else if (invoice.billing_type === "Service") {
                     // For Service: Only Service section fields (Subtotal + GST)
                     // Calculate subtotal from displayed Service fields
@@ -1202,7 +1201,8 @@ export default function InvoiceViewPage() {
                       parseFloat(invoice.registration_other_charges || 0) +
                       parseFloat(invoice.ca_charges || 0) +
                       parseFloat(invoice.ce_charges || 0) +
-                      parseFloat(invoice.reward_penalty_amount || 0)
+                      parseFloat(invoice.reward_amount || 0) -
+                      parseFloat(invoice.discount_amount || 0)
                     );
                     // Add GST amounts
                     const gstTotal = (invoiceCalculations?.cgstAmount || 0) + (invoiceCalculations?.sgstAmount || 0) + (invoiceCalculations?.igstAmount || 0);

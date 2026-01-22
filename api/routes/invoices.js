@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
+const InvoiceService = require('../services/InvoiceService');
 const { authenticate, requireRole } = require('../middleware/accessControl');
 
 // All routes require authentication
@@ -36,6 +37,49 @@ router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   }
 });
 
+// Get sample invoice calculation - Only Super Admin and Admin can access
+router.get('/sample', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  try {
+    const { job_ids, billing_type, reward_amount, discount_amount } = req.query;
+
+    // Validate required fields
+    if (!job_ids) {
+      return res.status(400).json({ error: 'job_ids is required' });
+    }
+
+    if (!billing_type) {
+      return res.status(400).json({ error: 'billing_type is required' });
+    }
+
+    // Parse job_ids (can be comma-separated string or array)
+    const jobIdsArray = Array.isArray(job_ids)
+      ? job_ids
+      : typeof job_ids === 'string'
+      ? job_ids.split(',').map((id) => id.trim())
+      : [job_ids];
+
+    if (jobIdsArray.length === 0) {
+      return res.status(400).json({ error: 'At least one job ID is required' });
+    }
+
+    // Calculate invoice breakdown
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      jobIdsArray,
+      billing_type,
+      reward_amount || 0,
+      discount_amount || 0
+    );
+
+    res.json(breakdown);
+  } catch (error) {
+    console.error('Error calculating sample invoice:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to calculate sample invoice',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
 // Get invoice by ID - Only Super Admin and Admin can access
 router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
@@ -56,74 +100,59 @@ router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
 router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
     const {
-      account_id,
-      job_register_id,
+      job_ids, // Array of job IDs for InvoiceSelectedJob table
       billing_type,
-      invoice_type,
-      pay_amount,
-      amount,
-      professional_charges,
-      registration_other_charges,
-      ca_charges,
-      ce_charges,
-      ca_cert_count,
-      ce_cert_count,
-      application_fees,
-      remi_one_charges,
-      remi_two_charges,
-      remi_three_charges,
-      remi_four_charges,
-      remi_five_charges,
-      reward_penalty_input,
-      reward_penalty_amount,
+      reward_amount,
+      discount_amount,
       note,
       po_no,
       irn_no,
-      job_ids, // Array of job IDs for InvoiceSelectedJob table
+      // Optional: account_id (if not provided, will be fetched from job)
+      account_id,
     } = req.body;
 
     // Validate required fields
-    if (!job_register_id) {
-      return res.status(400).json({ error: 'Job register ID is required' });
+    if (!job_ids || !Array.isArray(job_ids) || job_ids.length === 0) {
+      return res.status(400).json({ error: 'At least one job ID is required' });
     }
 
     if (!billing_type) {
       return res.status(400).json({ error: 'Billing type is required' });
     }
 
-    if (!invoice_type) {
-      return res.status(400).json({ error: 'Invoice type is required' });
-    }
-
-    if (!job_ids || !Array.isArray(job_ids) || job_ids.length === 0) {
-      return res.status(400).json({ error: 'At least one job ID is required' });
-    }
-
-    // Create invoice with selected jobs
-    const invoice = await Invoice.create({
-      account_id,
-      job_register_id,
+    // Calculate invoice breakdown using InvoiceService
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      job_ids,
       billing_type,
-      invoice_type,
-      pay_amount,
-      amount,
-      professional_charges,
-      registration_other_charges,
-      ca_charges,
-      ce_charges,
-      ca_cert_count,
-      ce_cert_count,
-      application_fees,
-      remi_one_charges,
-      remi_two_charges,
-      remi_three_charges,
-      remi_four_charges,
-      remi_five_charges,
-      reward_penalty_input,
-      reward_penalty_amount,
-      note,
-      po_no,
-      irn_no,
+      reward_amount || 0,
+      discount_amount || 0
+    );
+
+    // Use calculated values and job-derived values
+    const invoice = await Invoice.create({
+      account_id: account_id || breakdown.accountId,
+      job_register_id: breakdown.jobRegisterId,
+      billing_type: breakdown.billingType,
+      invoice_type: breakdown.invoiceType, // From job
+      pay_amount: breakdown.payAmount,
+      amount: breakdown.amount,
+      professional_charges: breakdown.professionalCharges,
+      registration_other_charges: breakdown.registrationCharges,
+      ca_charges: breakdown.caCharges,
+      ce_charges: breakdown.ceCharges,
+      ca_cert_count: breakdown.caCertCount,
+      ce_cert_count: breakdown.ceCertCount,
+      application_fees: breakdown.applicationFees,
+      remi_one_charges: breakdown.remiOneCharges,
+      remi_two_charges: breakdown.remiTwoCharges,
+      remi_three_charges: breakdown.remiThreeCharges,
+      remi_four_charges: breakdown.remiFourCharges,
+      remi_five_charges: breakdown.remiFiveCharges,
+      reward_amount: breakdown.rewardAmount,
+      discount_amount: breakdown.discountAmount,
+      note: note || null,
+      po_no: po_no || null,
+      irn_no: irn_no || null,
       job_ids,
       added_by: req.user.id, // Track who created this invoice
     });

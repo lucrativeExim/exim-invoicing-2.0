@@ -4,29 +4,32 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { accessControl } from '@/services/accessControl';
 import { Button } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
-import FieldsMasterForm from './FieldsMasterForm';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import Pagination from '@/components/Pagination';
 
 export default function FieldsMasterPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [fields, setFields] = useState([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingFieldId, setEditingFieldId] = useState(null);
-  const [formData, setFormData] = useState({
-    field_name: '',
-    field_type: '',
-    default_value: false,
-    treatment: [],
-    dropdown_options: [],
-  });
-  const [errors, setErrors] = useState({});
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const { toast, success, error: showError, hideToast } = useToast();
+
+  // Search functionality
+  const searchFields = ['field_name', 'field_type'];
+  const { searchTerm, setSearchTerm, filteredData: filteredFields, suggestions } = useTableSearch(
+    fields,
+    searchFields
+  );
+
+  // Pagination
+  const pagination = usePagination(filteredFields, { itemsPerPage: 10 });
 
   useEffect(() => {
     // Check if user has permission to access this page
@@ -54,151 +57,8 @@ export default function FieldsMasterPage() {
     }
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    
-    // If field_type is changing and it's not Dropdown, clear dropdown_options
-    if (name === 'field_type' && value !== 'Dropdown') {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-        dropdown_options: null, // Clear dropdown_options when field_type is not Dropdown
-      }));
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
-    
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-    
-    // Check field name uniqueness on change
-    if (name === 'field_name' && value) {
-      const existingField = fields.find(
-        (f) =>
-          f.field_name === value &&
-          f.id !== editingFieldId
-      );
-      if (existingField) {
-        setErrors((prev) => ({
-          ...prev,
-          field_name: 'Field name already exists',
-        }));
-      }
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-
-    if (!formData.field_name?.trim()) {
-      newErrors.field_name = 'Field name is required';
-    }
-
-    // Check field name uniqueness
-    if (formData.field_name) {
-      const existingField = fields.find(
-        (f) =>
-          f.field_name === formData.field_name &&
-          f.id !== editingFieldId
-      );
-      if (existingField) {
-        newErrors.field_name = 'Field name already exists';
-      }
-    }
-
-    if (!formData.field_type) {
-      newErrors.field_type = 'Field type is required';
-    }
-
-    if (formData.field_type === 'Dropdown') {
-      if (!formData.dropdown_options || formData.dropdown_options.length === 0) {
-        newErrors.dropdown_options = 'Dropdown options are required';
-      }
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   const handleEdit = (field) => {
-    setFormData({
-      field_name: field.field_name || '',
-      field_type: field.field_type || '',
-      default_value: field.default_value === true || field.default_value === 'true',
-      treatment: Array.isArray(field.treatment) ? field.treatment : [],
-      dropdown_options: Array.isArray(field.dropdown_options) ? field.dropdown_options : [],
-    });
-    setEditingFieldId(field.id);
-    setShowAddForm(true);
-    setErrors({});
-  };
-
-  const resetForm = () => {
-    setShowAddForm(false);
-    setEditingFieldId(null);
-    setFormData({
-      field_name: '',
-      field_type: '',
-      default_value: false,
-      treatment: [],
-      dropdown_options: [],
-    });
-    setErrors({});
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!validateForm()) {
-      return;
-    }
-
-    try {
-      const isEditing = !!editingFieldId;
-
-      const submitData = {
-        ...formData,
-        default_value: formData.default_value === true || formData.default_value === 'true',
-      };
-
-      // ALWAYS clear dropdown_options if field_type is not Dropdown
-      // This ensures dropdown_options are never sent when field_type is not Dropdown
-      if (submitData.field_type !== 'Dropdown') {
-        submitData.dropdown_options = null;
-      } else if (!submitData.dropdown_options || (Array.isArray(submitData.dropdown_options) && submitData.dropdown_options.length === 0)) {
-        // If field_type is Dropdown but no options provided, don't send dropdown_options
-        // The backend will validate and return an error
-        delete submitData.dropdown_options;
-      }
-
-      if (isEditing) {
-        await api.put(`/fields-master/${editingFieldId}`, submitData);
-        success('Field updated successfully');
-      } else {
-        await api.post('/fields-master', submitData);
-        success('Field created successfully');
-      }
-      
-      resetForm();
-      fetchFields();
-    } catch (err) {
-      console.error(`Error ${editingFieldId ? 'updating' : 'creating'} Field:`, err);
-      const errorMessage = err.response?.data?.error || `Failed to ${editingFieldId ? 'update' : 'create'} Field`;
-      showError(errorMessage);
-      
-      // Set field-specific errors if provided
-      if (err.response?.data?.errors) {
-        setErrors(err.response.data.errors);
-      }
-    }
+    router.push(`/dashboard/control-room/fields-master/edit/${field.id}`);
   };
 
   const handleDelete = async (id) => {
@@ -254,44 +114,39 @@ export default function FieldsMasterPage() {
           <p className="text-sm text-gray-600">Manage form fields and their configurations</p>
         </div> */}
         <Button
-          onClick={() => {
-            if (showAddForm) {
-              resetForm();
-            } else {
-              setShowAddForm(true);
-              setEditingFieldId(null);
-            }
-          }}
+          onClick={() => router.push('/dashboard/control-room/fields-master/add')}
           variant="primary"
         >
-          {showAddForm ? 'Cancel' : 'Add New Field'}
+          Add New Field
         </Button>
       </div>
 
-      {/* Add/Edit Field Form */}
-      {showAddForm && (
-        <FieldsMasterForm
-          formData={formData}
-          errors={errors}
-          editingFieldsMasterId={editingFieldId}
-          onChange={handleChange}
-          onSubmit={handleSubmit}
-          onCancel={resetForm}
-        />
-      )}
-
       {/* Fields Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">All Fields</h2>
+          <div className="w-80">
+            <TableSearch
+              value={searchTerm}
+              onChange={setSearchTerm}
+              suggestions={suggestions}
+              placeholder="Search fields..."
+              data={fields}
+              searchFields={searchFields}
+              maxSuggestions={5}
+              storageKey="fields_master"
+            />
+          </div>
         </div>
         {fieldsLoading ? (
           <div className="p-8 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
             <p className="mt-2 text-gray-600">Loading fields...</p>
           </div>
-        ) : fields.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No fields found</div>
+        ) : filteredFields.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            {searchTerm ? 'No fields match your search' : 'No fields found'}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -321,7 +176,7 @@ export default function FieldsMasterPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {fields.map((field) => (
+                {pagination.paginatedData.map((field) => (
                   <tr key={field.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
@@ -417,6 +272,16 @@ export default function FieldsMasterPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {!fieldsLoading && filteredFields.length > 0 && (
+          <Pagination
+            currentPage={pagination.currentPage}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            itemsPerPage={pagination.itemsPerPage}
+            onPageChange={pagination.setCurrentPage}
+            onItemsPerPageChange={pagination.setItemsPerPage}
+          />
         )}
       </div>
     </>

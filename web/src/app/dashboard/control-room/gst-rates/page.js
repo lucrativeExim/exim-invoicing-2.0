@@ -4,28 +4,32 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { accessControl } from '@/services/accessControl';
 import { Button } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
-import GstRateForm from './GstRateForm';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import Pagination from '@/components/Pagination';
 
 export default function GstRatesPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [gstRates, setGstRates] = useState([]);
   const [gstRatesLoading, setGstRatesLoading] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingGstRateId, setEditingGstRateId] = useState(null);
-  const [formData, setFormData] = useState({
-    sac_no: '',
-    sgst: '',
-    cgst: '',
-    igst: '',
-  });
-  const [errors, setErrors] = useState({});
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const { toast, success, error: showError, hideToast } = useToast();
+
+  // Search functionality
+  const searchFields = ['sac_no', 'sgst', 'cgst', 'igst'];
+  const { searchTerm, setSearchTerm, filteredData: filteredGstRates, suggestions } = useTableSearch(
+    gstRates,
+    searchFields
+  );
+
+  // Pagination
+  const pagination = usePagination(filteredGstRates, { itemsPerPage: 10 });
 
   useEffect(() => {
     // Check if user has permission to access this page
@@ -53,107 +57,8 @@ export default function GstRatesPage() {
     }
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-    
-    // Check SAC number uniqueness on change
-    if (name === 'sac_no' && value) {
-      const existingGstRate = gstRates.find(
-        (gr) =>
-          gr.sac_no === value &&
-          gr.id !== editingGstRateId
-      );
-      if (existingGstRate) {
-        setErrors((prev) => ({
-          ...prev,
-          sac_no: 'SAC number already exists',
-        }));
-      }
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-
-    if (!formData.sac_no?.trim()) {
-      newErrors.sac_no = 'SAC number is required';
-    }
-
-    // Check SAC number uniqueness
-    if (formData.sac_no) {
-      const existingGstRate = gstRates.find(
-        (gr) =>
-          gr.sac_no === formData.sac_no &&
-          gr.id !== editingGstRateId
-      );
-      if (existingGstRate) {
-        newErrors.sac_no = 'SAC number already exists';
-      }
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   const handleEdit = (gstRate) => {
-    setFormData({
-      sac_no: gstRate.sac_no || '',
-      sgst: gstRate.sgst !== null && gstRate.sgst !== undefined ? String(gstRate.sgst) : '',
-      cgst: gstRate.cgst !== null && gstRate.cgst !== undefined ? String(gstRate.cgst) : '',
-      igst: gstRate.igst !== null && gstRate.igst !== undefined ? String(gstRate.igst) : '',
-    });
-    setEditingGstRateId(gstRate.id);
-    setShowAddForm(true);
-    setErrors({});
-  };
-
-  const resetForm = () => {
-    setShowAddForm(false);
-    setEditingGstRateId(null);
-    setFormData({
-      sac_no: '',
-      sgst: '',
-      cgst: '',
-      igst: '',
-    });
-    setErrors({});
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!validateForm()) {
-      return;
-    }
-
-    try {
-      const isEditing = !!editingGstRateId;
-
-      if (isEditing) {
-        await api.put(`/gst-rates/${editingGstRateId}`, formData);
-        success('GST rate updated successfully');
-      } else {
-        await api.post('/gst-rates', formData);
-        success('GST rate created successfully');
-      }
-      
-      resetForm();
-      fetchGstRates();
-    } catch (err) {
-      console.error(`Error ${editingGstRateId ? 'updating' : 'creating'} GST rate:`, err);
-      showError(err.response?.data?.error || `Failed to ${editingGstRateId ? 'update' : 'create'} GST rate`);
-    }
+    router.push(`/dashboard/control-room/gst-rates/edit/${gstRate.id}`);
   };
 
   const handleDelete = async (id) => {
@@ -198,44 +103,39 @@ export default function GstRatesPage() {
           <p className="text-sm text-gray-600">Manage GST rates and tax percentages</p>
         </div> */}
         <Button
-          onClick={() => {
-            if (showAddForm) {
-              resetForm();
-            } else {
-              setShowAddForm(true);
-              setEditingGstRateId(null);
-            }
-          }}
+          onClick={() => router.push('/dashboard/control-room/gst-rates/add')}
           variant="primary"
         >
-          {showAddForm ? 'Cancel' : 'Add New GST Rate'}
+          Add New GST Rate
         </Button>
       </div>
 
-      {/* Add/Edit GST Rate Form */}
-      {showAddForm && (
-        <GstRateForm
-          formData={formData}
-          errors={errors}
-          editingGstRateId={editingGstRateId}
-          onChange={handleChange}
-          onSubmit={handleSubmit}
-          onCancel={resetForm}
-        />
-      )}
-
       {/* GST Rates Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">All GST Rates</h2>
+          <div className="w-80">
+            <TableSearch
+              value={searchTerm}
+              onChange={setSearchTerm}
+              suggestions={suggestions}
+              placeholder="Search GST rates..."
+              data={gstRates}
+              searchFields={searchFields}
+              maxSuggestions={5}
+              storageKey="gst_rates"
+            />
+          </div>
         </div>
         {gstRatesLoading ? (
           <div className="p-8 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
             <p className="mt-2 text-gray-600">Loading GST rates...</p>
           </div>
-        ) : gstRates.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No GST rates found</div>
+        ) : filteredGstRates.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            {searchTerm ? 'No GST rates match your search' : 'No GST rates found'}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -262,7 +162,7 @@ export default function GstRatesPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {gstRates.map((gstRate) => (
+                {pagination.paginatedData.map((gstRate) => (
                   <tr key={gstRate.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
@@ -349,6 +249,16 @@ export default function GstRatesPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {!gstRatesLoading && filteredGstRates.length > 0 && (
+          <Pagination
+            currentPage={pagination.currentPage}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            itemsPerPage={pagination.itemsPerPage}
+            onPageChange={pagination.setCurrentPage}
+            onItemsPerPageChange={pagination.setItemsPerPage}
+          />
         )}
       </div>
     </>

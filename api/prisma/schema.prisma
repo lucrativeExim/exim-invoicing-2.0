@@ -596,8 +596,8 @@ model Invoice {
   remi_three_charges           Decimal?              @db.Decimal(10, 2) @default(0)
   remi_four_charges            Decimal?              @db.Decimal(10, 2) @default(0)
   remi_five_charges            Decimal?              @db.Decimal(10, 2) @default(0)
-  reward_penalty_input         String?                @db.VarChar(255) @default("0")
-  reward_penalty_amount        Decimal?               @db.Decimal(10, 2) @default(0)
+  reward_amount                Decimal?               @db.Decimal(10, 2) @default(0)
+  discount_amount              Decimal?               @db.Decimal(10, 2) @default(0)
   note                         String?               @db.Text
   po_no                        String?               @db.VarChar(255)
   irn_no                       String?              @db.VarChar(255)

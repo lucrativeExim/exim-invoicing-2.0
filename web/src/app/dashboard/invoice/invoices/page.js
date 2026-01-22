@@ -3,8 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SelectBox } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import Pagination from '@/components/Pagination';
 
 export default function InvoicesPage() {
   const router = useRouter();
@@ -12,6 +16,24 @@ export default function InvoicesPage() {
   const [invoiceType, setInvoiceType] = useState('');
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Search functionality
+  const searchFields = [
+    'draft_view_id',
+    'proforma_view_id',
+    'jobRegister.job_code',
+    'billing_type',
+    'invoice_type',
+    'addedByUser.first_name',
+    'addedByUser.last_name',
+  ];
+  const { searchTerm, setSearchTerm, filteredData: filteredInvoices, suggestions } = useTableSearch(
+    invoices,
+    searchFields
+  );
+
+  // Pagination
+  const pagination = usePagination(filteredInvoices, { itemsPerPage: 10 });
 
   const invoiceTypeOptions = [
     { value: 'draft', label: 'Draft Invoice' },
@@ -120,18 +142,32 @@ export default function InvoicesPage() {
         {/* Invoices Table */}
         {invoiceType && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">
                 {invoiceType === 'draft' ? 'Draft Invoices' : 'Proforma Invoices'}
               </h2>
+              <div className="w-80">
+                <TableSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  suggestions={suggestions}
+                  placeholder="Search invoices..."
+                  data={invoices}
+                  searchFields={searchFields}
+                  maxSuggestions={5}
+                  storageKey={`invoices_${invoiceType || 'all'}`}
+                />
+              </div>
             </div>
             {loading ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                 <p className="mt-2 text-gray-600">Loading invoices...</p>
               </div>
-            ) : invoices.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No invoices found</div>
+            ) : filteredInvoices.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {searchTerm ? 'No invoices match your search' : 'No invoices found'}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -161,7 +197,7 @@ export default function InvoicesPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {invoices.map((invoice) => (
+                    {pagination.paginatedData.map((invoice) => (
                       <tr key={invoice.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           <button
@@ -185,18 +221,36 @@ export default function InvoicesPage() {
                           {invoice.invoice_type || '-'}
                         </td> 
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {formatDateDDMMYYYY(invoice.created_at)}
+                          {formatDateDDMMYYYY(
+                            invoiceType === 'proforma' 
+                              ? invoice.proforma_created_at 
+                              : invoice.created_at
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {invoice.addedByUser
-                            ? `${invoice.addedByUser.first_name} ${invoice.addedByUser.last_name}`
-                            : '-'}
+                          {invoiceType === 'Proforma' 
+                            ? (invoice.proforma_created_by
+                                ? `${invoice.proforma_created_by.first_name} ${invoice.proforma_created_by.last_name}`
+                                : '-')
+                            : (invoice.addedByUser
+                                ? `${invoice.addedByUser.first_name} ${invoice.addedByUser.last_name}`
+                                : '-')}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
+            {!loading && filteredInvoices.length > 0 && (
+              <Pagination
+                currentPage={pagination.currentPage}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.totalItems}
+                itemsPerPage={pagination.itemsPerPage}
+                onPageChange={pagination.setCurrentPage}
+                onItemsPerPageChange={pagination.setItemsPerPage}
+              />
             )}
           </div>
         )}

@@ -4,10 +4,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { accessControl } from '@/services/accessControl';
 import { Button } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
 import api from '@/services/api';
 import Tabs from '@/components/Tabs';
+import Pagination from '@/components/Pagination';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -21,6 +25,63 @@ export default function ClientPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deleteType, setDeleteType] = useState(null);
   const { toast, success, error: showError, hideToast } = useToast();
+
+  // Search functionality for Client Info tab
+  const clientInfoSearchFields = [
+    'account.account_name',
+    'client_name',
+    'iec_no',
+    'alias',
+    'credit_terms',
+  ];
+  const {
+    searchTerm: clientInfoSearchTerm,
+    setSearchTerm: setClientInfoSearchTerm,
+    filteredData: filteredClientInfos,
+    suggestions: clientInfoSuggestions,
+  } = useTableSearch(clientInfos, clientInfoSearchFields);
+
+  // Search functionality for Client BU tab
+  const clientBuSearchFields = [
+    'clientInfo.client_name',
+    'bu_name',
+    'client_type',
+    'state.state_name',
+    'city',
+    'gst_no',
+    'sc_i',
+  ];
+  const {
+    searchTerm: clientBuSearchTerm,
+    setSearchTerm: setClientBuSearchTerm,
+    filteredData: filteredClientBus,
+    suggestions: clientBuSuggestions,
+  } = useTableSearch(clientBus, clientBuSearchFields);
+
+  // Search functionality for Service Charges tab
+  const serviceChargesSearchFields = [
+    'group_id',
+    'account.account_name',
+    'clientInfo.client_name',
+    'clientBu.bu_name',
+    'jobRegister.job_title',
+    'concern_person',
+  ];
+  const {
+    searchTerm: serviceChargesSearchTerm,
+    setSearchTerm: setServiceChargesSearchTerm,
+    filteredData: filteredServiceCharges,
+    suggestions: serviceChargesSuggestions,
+  } = useTableSearch(serviceCharges, serviceChargesSearchFields);
+
+  // Pagination for Client Info tab
+  const clientInfoPagination = usePagination(filteredClientInfos, { itemsPerPage: 10 });
+
+  // Pagination for Branch Info tab
+  const branchInfoPagination = usePagination(filteredClientBus, { itemsPerPage: 10 });
+
+  // Pagination for Service Charges tab
+  const serviceChargesPagination = usePagination(filteredServiceCharges, { itemsPerPage: 10 });
 
   const fetchClientInfos = useCallback(async () => {
     try {
@@ -191,16 +252,30 @@ export default function ClientPage() {
       <div className="mt-6">
         {activeTab === 'client-info' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">All Clients</h2>
+              <div className="w-80">
+                <TableSearch
+                  value={clientInfoSearchTerm}
+                  onChange={setClientInfoSearchTerm}
+                  suggestions={clientInfoSuggestions}
+                  placeholder="Search clients..."
+                  data={clientInfos}
+                  searchFields={clientInfoSearchFields}
+                  maxSuggestions={5}
+                  storageKey="client_info"
+                />
+              </div>
             </div>
             {dataLoading ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                 <p className="mt-2 text-gray-600">Loading clients...</p>
               </div>
-            ) : clientInfos.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No clients found</div>
+            ) : filteredClientInfos.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {clientInfoSearchTerm ? 'No clients match your search' : 'No clients found'}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -217,7 +292,7 @@ export default function ClientPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {clientInfos.map((client) => (
+                    {clientInfoPagination.paginatedData.map((client) => (
                       <tr key={client.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex items-center space-x-2">
@@ -310,21 +385,45 @@ export default function ClientPage() {
                 </table>
               </div>
             )}
+            {!dataLoading && filteredClientInfos.length > 0 && (
+              <Pagination
+                currentPage={clientInfoPagination.currentPage}
+                totalPages={clientInfoPagination.totalPages}
+                totalItems={clientInfoPagination.totalItems}
+                itemsPerPage={clientInfoPagination.itemsPerPage}
+                onPageChange={clientInfoPagination.setCurrentPage}
+                onItemsPerPageChange={clientInfoPagination.setItemsPerPage}
+              />
+            )}
           </div>
         )}
 
         {activeTab === 'branch-info' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">All Branches</h2>
+              <div className="w-80">
+                <TableSearch
+                  value={clientBuSearchTerm}
+                  onChange={setClientBuSearchTerm}
+                  suggestions={clientBuSuggestions}
+                  placeholder="Search branches..."
+                  data={clientBus}
+                  searchFields={clientBuSearchFields}
+                  maxSuggestions={5}
+                  storageKey="client_bu"
+                />
+              </div>
             </div>
             {dataLoading ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                 <p className="mt-2 text-gray-600">Loading branches...</p>
               </div>
-            ) : clientBus.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No branches found</div>
+            ) : filteredClientBus.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {clientBuSearchTerm ? 'No branches match your search' : 'No branches found'}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -342,7 +441,7 @@ export default function ClientPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {clientBus.map((bu) => (
+                    {branchInfoPagination.paginatedData.map((bu) => (
                       <tr key={bu.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex items-center space-x-2">
@@ -433,21 +532,45 @@ export default function ClientPage() {
                 </table>
               </div>
             )}
+            {!dataLoading && filteredClientBus.length > 0 && (
+              <Pagination
+                currentPage={branchInfoPagination.currentPage}
+                totalPages={branchInfoPagination.totalPages}
+                totalItems={branchInfoPagination.totalItems}
+                itemsPerPage={branchInfoPagination.itemsPerPage}
+                onPageChange={branchInfoPagination.setCurrentPage}
+                onItemsPerPageChange={branchInfoPagination.setItemsPerPage}
+              />
+            )}
           </div>
         )}
 
         {activeTab === 'service-charges' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">All Service Charges</h2>
+              <div className="w-80">
+                <TableSearch
+                  value={serviceChargesSearchTerm}
+                  onChange={setServiceChargesSearchTerm}
+                  suggestions={serviceChargesSuggestions}
+                  placeholder="Search service charges..."
+                  data={serviceCharges}
+                  searchFields={serviceChargesSearchFields}
+                  maxSuggestions={5}
+                  storageKey="service_charges"
+                />
+              </div>
             </div>
             {dataLoading ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                 <p className="mt-2 text-gray-600">Loading service charges...</p>
               </div>
-            ) : serviceCharges.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No service charges found</div>
+            ) : filteredServiceCharges.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {serviceChargesSearchTerm ? 'No service charges match your search' : 'No service charges found'}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -464,7 +587,7 @@ export default function ClientPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {serviceCharges.map((charge) => (
+                    {serviceChargesPagination.paginatedData.map((charge) => (
                       <tr key={charge.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex items-center space-x-2">
@@ -551,6 +674,16 @@ export default function ClientPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {!dataLoading && filteredServiceCharges.length > 0 && (
+              <Pagination
+                currentPage={serviceChargesPagination.currentPage}
+                totalPages={serviceChargesPagination.totalPages}
+                totalItems={serviceChargesPagination.totalItems}
+                itemsPerPage={serviceChargesPagination.itemsPerPage}
+                onPageChange={serviceChargesPagination.setCurrentPage}
+                onItemsPerPageChange={serviceChargesPagination.setItemsPerPage}
+              />
             )}
           </div>
         )}

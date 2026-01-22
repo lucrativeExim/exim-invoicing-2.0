@@ -2034,7 +2034,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
               {!isEditMode && (
                 <Button
                   type="button"
-                  variant="primary"
+                  variant="secondary"
                   onClick={handleReset}
                 >
                   Reset

@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { accessControl } from '@/services/accessControl';
 import { Button } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
+import { usePagination } from '@/hooks/usePagination';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import Pagination from '@/components/Pagination';
 
 export default function JobRegisterPage() {
   const router = useRouter();
@@ -17,6 +21,22 @@ export default function JobRegisterPage() {
   const [jobRegistersLoading, setJobRegistersLoading] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const { toast, success, error: showError, hideToast } = useToast();
+
+  // Search functionality
+  const searchFields = [
+    'job_code',
+    'job_title',
+    'job_type',
+    'gstRate.sac_no',
+    'status',
+  ];
+  const { searchTerm, setSearchTerm, filteredData: filteredJobRegisters, suggestions } = useTableSearch(
+    jobRegisters,
+    searchFields
+  );
+
+  // Pagination - use filtered data instead of all job registers
+  const pagination = usePagination(filteredJobRegisters, { itemsPerPage: 10 });
 
   useEffect(() => {
     // Check if user has permission to access this page
@@ -108,16 +128,30 @@ export default function JobRegisterPage() {
 
       {/* Job Registers Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">All Job Registers</h2>
+          <div className="w-80">
+            <TableSearch
+              value={searchTerm}
+              onChange={setSearchTerm}
+              suggestions={suggestions}
+              placeholder="Search job registers..."
+              data={jobRegisters}
+              searchFields={searchFields}
+              maxSuggestions={5}
+              storageKey="job_registers"
+            />
+          </div>
         </div>
         {jobRegistersLoading ? (
           <div className="p-8 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
             <p className="mt-2 text-gray-600">Loading job registers...</p>
           </div>
-        ) : jobRegisters.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No job registers found</div>
+        ) : filteredJobRegisters.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            {searchTerm ? 'No job registers match your search' : 'No job registers found'}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -147,7 +181,7 @@ export default function JobRegisterPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {jobRegisters.map((jobRegister) => (
+                {pagination.paginatedData.map((jobRegister) => (
                   <tr key={jobRegister.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex items-center space-x-2">
@@ -244,6 +278,16 @@ export default function JobRegisterPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {!jobRegistersLoading && filteredJobRegisters.length > 0 && (
+          <Pagination
+            currentPage={pagination.currentPage}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            itemsPerPage={pagination.itemsPerPage}
+            onPageChange={pagination.setCurrentPage}
+            onItemsPerPageChange={pagination.setItemsPerPage}
+          />
         )}
       </div>
     </>

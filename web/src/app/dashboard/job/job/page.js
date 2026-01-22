@@ -3,10 +3,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, SelectBox } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import Modal from '@/components/Modal';
 import api from '@/services/api';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
+import Pagination from '@/components/Pagination';
 
 export default function JobPage() {
   const router = useRouter();
@@ -19,7 +23,6 @@ export default function JobPage() {
   const [jobStatus, setJobStatus] = useState('In_process');
   const [loading, setLoading] = useState(false);
   const [loadingJobCodes, setLoadingJobCodes] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [buNameMap, setBuNameMap] = useState({});
   const isInitialized = useRef(false);
   
@@ -146,35 +149,31 @@ export default function JobPage() {
   }, [selectedJobCodeId, jobStatus, fetchJobs]);
 
   // Filter jobs based on selected job code - only show if job code is selected
-  const filteredJobs = useMemo(() => {
-    // Don't show any jobs until a job code is selected
+  const jobsForSearch = useMemo(() => {
     if (!selectedJobCodeId) {
       return [];
     }
-    
-    let filtered = allJobs;
-    
-    // Filter by selected job code
-    filtered = filtered.filter(job => 
+    return allJobs.filter(job => 
       job.jobRegister && job.jobRegister.id.toString() === selectedJobCodeId.toString()
     );
-    
-    // Filter by search term
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      filtered = filtered.filter(job => {
-        return (
-          job.job_no?.toLowerCase().includes(search) ||
-          job.claim_no?.toLowerCase().includes(search) ||
-          job.po_no?.toLowerCase().includes(search) ||
-          job.jobServiceCharges?.[0]?.client_name?.toLowerCase().includes(search) ||
-          job.jobServiceCharges?.[0]?.group_id?.toLowerCase().includes(search)
-        );
-      });
-    }
-    
-    return filtered;
-  }, [allJobs, selectedJobCodeId, searchTerm]);
+  }, [allJobs, selectedJobCodeId]);
+
+  // Search functionality
+  const searchFields = [
+    'job_no',
+    'claim_no',
+    'po_no',
+    'jobServiceCharges.0.client_name',
+    'jobServiceCharges.0.group_id',
+    'jobServiceCharges.0.clientBu.bu_name',
+  ];
+  const { searchTerm, setSearchTerm, filteredData: filteredJobs, suggestions } = useTableSearch(
+    jobsForSearch,
+    searchFields
+  );
+
+  // Pagination
+  const pagination = usePagination(filteredJobs, { itemsPerPage: 10 });
 
   const handleAddJob = () => {
     router.push('/dashboard/job/job/add');
@@ -508,31 +507,36 @@ export default function JobPage() {
       </div>
 
       {/* Search and Actions Bar */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 max-w-md">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-              </svg>
-            </button>
-            <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </button>
+      {selectedJobCodeId && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1 max-w-md">
+              <TableSearch
+                value={searchTerm}
+                onChange={setSearchTerm}
+                suggestions={suggestions}
+                placeholder="Search jobs by job no, claim no, PO no, client name..."
+                data={jobsForSearch}
+                searchFields={searchFields}
+                maxSuggestions={5}
+                storageKey={`jobs_${selectedJobCodeId || 'all'}`}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+              </button>
+              <button className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Jobs Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -547,13 +551,6 @@ export default function JobPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client Name</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client Id</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Division Bu Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type Of Claim</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Processor</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Port</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Claim No</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Po No</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description Of Quantity</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -572,11 +569,11 @@ export default function JobPage() {
               ) : filteredJobs.length === 0 ? (
                 <tr>
                   <td colSpan={14} className="px-4 py-8 text-center text-gray-500">
-                    No jobs found
+                    {searchTerm ? 'No jobs match your search' : 'No jobs found'}
                   </td>
                 </tr>
               ) : (
-                filteredJobs.map((job, index) => {
+                pagination.paginatedData.map((job, index) => {
                   const serviceCharge = job.jobServiceCharges?.[0];
                   return (
                     <tr key={job.id} className="hover:bg-gray-50">
@@ -617,13 +614,6 @@ export default function JobPage() {
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.clientInfo?.client_name || serviceCharge?.client_name || '-'}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{serviceCharge?.group_id || '-'}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.clientBu?.bu_name || getBuName(job) || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.jobRegister?.job_code || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.processor || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.port || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.claim_no || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.po_no || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.quantity || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{job.description_of_quantity || '-'}</td>
                     </tr>
                   );
                 })
@@ -631,6 +621,16 @@ export default function JobPage() {
             </tbody>
           </table>
         </div>
+        {filteredJobs.length > 0 && (
+          <Pagination
+            currentPage={pagination.currentPage}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            itemsPerPage={pagination.itemsPerPage}
+            onPageChange={pagination.setCurrentPage}
+            onItemsPerPageChange={pagination.setItemsPerPage}
+          />
+        )}
       </div>
 
       {/* Attachment Modal */}
@@ -731,12 +731,13 @@ export default function JobPage() {
               Add More
             </button>
             <div className="flex gap-3">
-              <button
+              <Button
+                type="button"
+                variant="secondary"
                 onClick={handleCloseAttachmentModal}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm font-medium"
               >
                 Cancel
-              </button>
+              </Button>
               <button
                 onClick={handleSaveAttachments}
                 className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-500 text-sm font-medium"

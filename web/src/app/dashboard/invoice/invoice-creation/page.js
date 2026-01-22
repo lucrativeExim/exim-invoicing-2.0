@@ -108,18 +108,20 @@ export default function InvoiceCreationPage() {
     amount: "",
     percentage: "0.00",
     perShb: "0",
-    rewardDiscountPercent: "",
-    rewardDiscountAmount: "",
+    reward_amount: "",
+    discount_amount: "",
   });
   const [billingFieldNames, setBillingFieldNames] = useState([]);
+  const [rewardDiscountType, setRewardDiscountType] = useState("reward"); // "reward" or "discount"
   const [rewardDiscountErrors, setRewardDiscountErrors] = useState({
-    percent: "",
     amount: "",
   });
   const rewardDiscountAmountInputRef = useRef(null);
   const isTypingRewardDiscountRef = useRef(false);
   const isPrintingRef = useRef(false);
   const [excludedJobIds, setExcludedJobIds] = useState([]); // Jobs with active, non-canceled invoices
+  const [invoiceBreakdown, setInvoiceBreakdown] = useState(null); // API response from /invoices/sample
+  const [invoiceBreakdownLoading, setInvoiceBreakdownLoading] = useState(false);
 
   // Lock body scroll when Invoice Calculation Modal or Sample Invoice modal is open
   useEffect(() => {
@@ -697,6 +699,40 @@ export default function InvoiceCreationPage() {
     fetchExcludedJobs();
   }, [selectedJobCode, billingType, jobs]);
 
+  // Function to fetch invoice breakdown from API
+  const fetchInvoiceBreakdown = async () => {
+    // Only fetch if we have selected jobs and billing type
+    if (selectedJobIds.length === 0 || !billingType) {
+      setInvoiceBreakdown(null);
+      return false;
+    }
+
+    try {
+      setInvoiceBreakdownLoading(true);
+
+      // Call the /invoices/sample API
+      // Note: InvoiceService expects billing_type as "Service", "Reimbursement", or "Service & Reimbursement"
+      const response = await api.get('/invoices/sample', {
+        params: {
+          job_ids: selectedJobIds.join(','),
+          billing_type: billingType,
+          reward_amount: invoiceCalculation.reward_amount || 0,
+          discount_amount: invoiceCalculation.discount_amount || 0,
+        },
+      });
+
+      setInvoiceBreakdown(response.data);
+      return true;
+    } catch (error) {
+      console.error('Error fetching invoice breakdown:', error);
+      setInvoiceBreakdown(null);
+      alert('Error fetching invoice breakdown. Please try again.');
+      return false;
+    } finally {
+      setInvoiceBreakdownLoading(false);
+    }
+  };
+
   // Handle invoice type change - update billing type based on invoice type
   const handleInvoiceTypeChange = (e) => {
     const newInvoiceType = e.target.value;
@@ -1016,7 +1052,7 @@ export default function InvoiceCreationPage() {
     fetchJobServiceCharges();
   }, [selectedJobIds]);
 
-  // Calculate aggregated values for selected jobs
+  // Calculate aggregated values for selected jobs - uses client-side calculation
   const calculateAggregatedInvoiceAmount = () => {
     if (selectedJobIds.length === 0) {
       return {
@@ -1136,190 +1172,84 @@ export default function InvoiceCreationPage() {
     { value: "Partial Invoice", label: "Partial Invoice" },
   ];
 
-  // Handle Reward/Discount Percentage change
-  const handleRewardDiscountPercentChange = (e) => {
-    const inputValue = e.target.value.trim();
-
-    // Allow empty string
-    if (inputValue === "") {
-      setInvoiceCalculation((prev) => ({
-        ...prev,
-        rewardDiscountPercent: "",
-        rewardDiscountAmount: "",
-      }));
-      return;
-    }
-
-    // Check if input starts with + or -
-    const sign = inputValue.startsWith("-") ? "-" : "+";
-
-    // Extract numeric part (remove + and - signs)
-    const numericPart = inputValue.replace(/[+-]/g, "");
-
-    // Allow partial input (e.g., just "+" or "-")
-    if (numericPart === "" && (inputValue === "+" || inputValue === "-")) {
-      setInvoiceCalculation((prev) => ({
-        ...prev,
-        rewardDiscountPercent: inputValue,
-      }));
-      return;
-    }
-
-    // Parse the numeric value
-    let numericValue = parseFloat(numericPart);
-
-    // If NaN, don't update
-    if (isNaN(numericValue)) {
-      return;
-    }
-
-    // Clamp value between 0 and 100 (absolute value)
-    numericValue = Math.max(0, Math.min(100, numericValue));
-
-    // Apply sign: if input had - sign, make negative; otherwise positive
-    const signedValue = sign === "-" ? -numericValue : numericValue;
-
-    // Format with sign, preserve decimal places
-    const formattedValue =
-      signedValue >= 0 ? `+${numericValue}` : `${numericValue}`;
-
-    // Calculate reward/discount amount from percentage
-    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
-    const calculatedAmount = (baseAmount * Math.abs(numericValue)) / 100;
-
-    // Apply sign to amount
-    const rewardDiscountAmount =
-      signedValue >= 0 ? calculatedAmount : -calculatedAmount;
-
-    setInvoiceCalculation((prev) => ({
-      ...prev,
-      rewardDiscountPercent: formattedValue,
-      rewardDiscountAmount:
-        baseAmount > 0 ? rewardDiscountAmount.toFixed(2) : "",
-    }));
-  };
-
   // Handle Reward/Discount Amount change
   const handleRewardDiscountAmountChange = (e) => {
     const inputValue = e.target.value;
+    const fieldName = rewardDiscountType === "reward"
+      ? "reward_amount"
+      : "discount_amount";
 
-    // Allow empty string
+    // Allow empty string for free typing
     if (inputValue === "") {
       setInvoiceCalculation((prev) => ({
         ...prev,
-        rewardDiscountAmount: "",
-        rewardDiscountPercent: "",
+        [fieldName]: "",
       }));
-      return;
-    }
-
-    // Validate and restrict to 2 decimal places
-    // Allow negative sign, digits, and one decimal point
-    const validPattern = /^-?\d*\.?\d{0,2}$/;
-    if (!validPattern.test(inputValue)) {
-      // If invalid, don't update
-      return;
-    }
-
-    // Parse the value
-    let numericValue = parseFloat(inputValue);
-
-    // If NaN, don't update
-    if (isNaN(numericValue)) {
-      return;
-    }
-
-    // Store the numeric value immediately for real-time calculation
-    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
-
-    if (baseAmount === 0) {
-      // If base amount is 0, can't calculate percentage, but store the amount
-      setInvoiceCalculation((prev) => ({
+      setRewardDiscountErrors((prev) => ({
         ...prev,
-        rewardDiscountAmount: numericValue,
+        amount: "",
       }));
       return;
     }
 
-    // Calculate percentage: (amount / baseAmount) * 100
-    const calculatedPercent = (Math.abs(numericValue) / baseAmount) * 100;
+    // Allow only numbers and one decimal point (up to 2 decimal places)
+    const validPattern = /^\d*\.?\d{0,2}$/;
+    if (!validPattern.test(inputValue)) {
+      return; // Don't update if invalid
+    }
 
-    // Clamp percentage between 0 and 100 (absolute value)
-    const clampedPercent = Math.max(0, Math.min(100, calculatedPercent));
-
-    // Format percentage with sign based on amount sign
-    const formattedPercent =
-      numericValue >= 0 ? `+${clampedPercent}` : `-${clampedPercent}`;
-
-    // Store numeric value for real-time calculation
-    // This will trigger the finalAmount useMemo to recalculate
+    // Allow partial input (e.g., "5.", "10.5")
+    // Store the raw input value for free typing
     setInvoiceCalculation((prev) => ({
       ...prev,
-      rewardDiscountAmount: numericValue,
-      rewardDiscountPercent: formattedPercent,
+      [fieldName]: inputValue,
+    }));
+
+    // Clear error while typing
+    setRewardDiscountErrors((prev) => ({
+      ...prev,
+      amount: "",
     }));
   };
 
-  // Recalculate reward/discount amount when base amount changes (if percentage is set)
+  // Update invoiceCalculation.amount from API response when available
   useEffect(() => {
-    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
-    const rewardDiscountPercent = invoiceCalculation.rewardDiscountPercent;
-
-    if (rewardDiscountPercent && baseAmount > 0) {
-      const sign = rewardDiscountPercent.startsWith("-") ? "-" : "+";
-      const numericPart = rewardDiscountPercent.replace(/[+-]/g, "");
-      let numericValue = parseFloat(numericPart);
-
-      if (!isNaN(numericValue)) {
-        // Clamp value between 0 and 100 (absolute value)
-        numericValue = Math.max(0, Math.min(100, numericValue));
-        const calculatedAmount = (baseAmount * numericValue) / 100;
-        const rewardDiscountAmount =
-          sign === "-" ? -calculatedAmount : calculatedAmount;
-
-        setInvoiceCalculation((prev) => ({
-          ...prev,
-          rewardDiscountAmount: rewardDiscountAmount.toFixed(2),
-        }));
-      }
+    if (invoiceBreakdown) {
+      setInvoiceCalculation((prev) => ({
+        ...prev,
+        amount: (invoiceBreakdown.professionalCharges || 0).toFixed(2),
+      }));
     }
-  }, [invoiceCalculation.amount, invoiceCalculation.rewardDiscountPercent]);
+  }, [invoiceBreakdown]);
 
-  // Calculate final amount with reward/discount applied
+
+  // Final amount - uses API response for sample invoice, client-side for partial invoice breakdown
   const finalAmount = useMemo(() => {
-    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
-    const rewardDiscountValue = invoiceCalculation.rewardDiscountAmount;
-
-    // Parse reward/discount amount - handle both number and string
-    let rewardDiscountAmount = 0;
-
-    // Check if value exists
-    if (
-      rewardDiscountValue !== "" &&
-      rewardDiscountValue !== null &&
-      rewardDiscountValue !== undefined
-    ) {
-      if (typeof rewardDiscountValue === "number") {
-        // If it's already a number, use it directly
-        rewardDiscountAmount = isNaN(rewardDiscountValue)
-          ? 0
-          : rewardDiscountValue;
-      } else {
-        // If it's a string, parse it
-        const strValue = String(rewardDiscountValue).trim();
-        if (strValue !== "") {
-          const parsed = parseFloat(strValue);
-          rewardDiscountAmount = isNaN(parsed) ? 0 : parsed;
-        }
-      }
+    // Use API response if available (for sample invoice)
+    if (invoiceBreakdown?.serviceSubtotal !== undefined) {
+      return invoiceBreakdown.serviceSubtotal.toFixed(2);
     }
+    
+    // Fallback to client-side calculation (for partial invoice breakdown)
+    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
+    const rewardAmount = parseFloat(invoiceCalculation.reward_amount || 0) || 0;
+    const discountAmount = parseFloat(invoiceCalculation.discount_amount || 0) || 0;
+    const calculatedFinalAmount = baseAmount + rewardAmount - discountAmount;
+    return calculatedFinalAmount.toFixed(2);
+  }, [invoiceBreakdown, invoiceCalculation.amount, invoiceCalculation.reward_amount, invoiceCalculation.discount_amount]);
 
-    // Calculate final amount: base + reward/discount
-    const calculatedFinalAmount = baseAmount + rewardDiscountAmount;
-    const result = calculatedFinalAmount.toFixed(2);
+  // Calculate service subtotal (base amount + registration + CA + CE charges) for sample invoice
+  // This excludes reward/discount amounts
+  const calculateServiceSubtotal = () => {
+    const baseAmount = parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0);
+    const registrationCharges = parseFloat(sampleInvoiceData.registrationCharges || 0);
+    const caCharges = parseFloat(sampleInvoiceData.caCharges || 0);
+    const ceCharges = parseFloat(sampleInvoiceData.ceCharges || 0);
+    const rewardAmount = parseFloat(sampleInvoiceData.reward_amount || 0);
+    const discountAmount = parseFloat(sampleInvoiceData.discount_amount || 0);
 
-    return result;
-  }, [invoiceCalculation.amount, invoiceCalculation.rewardDiscountAmount]);
+    return (baseAmount + registrationCharges + caCharges + ceCharges + rewardAmount) - discountAmount ;
+  };
 
   // Helper function to convert number to words (Indian currency format)
   const numberToWords = (num) => {
@@ -1427,13 +1357,15 @@ export default function InvoiceCreationPage() {
     return result + " Only";
   };
 
-  // Calculate combined application fees from all selected jobs - fetch from JobFieldValue table
-  // Sum up appl_fee_duty_paid from all selected jobs
-  // Try multiple field name variations: "appl_fee_duty_paid", "Appl Fees Paid", "appl_fees_paid", etc.
+  // Combined application fees - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedApplicationFees = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.applicationFees !== undefined) {
+      return invoiceBreakdown.applicationFees;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-
-    // Sum up appl_fee_duty_paid from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
       const fieldValue =
         getFieldValueFromJobFieldValue(
@@ -1461,7 +1393,7 @@ export default function InvoiceCreationPage() {
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobFieldValuesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobFieldValuesMap]);
 
   // Get selected job code name from job_register table
   // Join with job_register table using job_register_id to fetch job_code
@@ -1552,11 +1484,15 @@ export default function InvoiceCreationPage() {
     return null;
   }, [selectedJobIds, jobs]);
 
-  // Calculate combined CA CERT count from all selected jobs - fetch from JobFieldValue table
-  // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
+  // Combined CA CERT count - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedCaCertCount = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.caCertCount !== undefined) {
+      return invoiceBreakdown.caCertCount;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-    // Sum up CA CERT count from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
       const fieldValue =
         getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
@@ -1564,13 +1500,17 @@ export default function InvoiceCreationPage() {
         getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
       return total + (parseInt(fieldValue) || 0);
     }, 0);
-  }, [selectedJobIds, jobFieldValuesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobFieldValuesMap]);
 
-  // Calculate combined CE CERT count from all selected jobs - fetch from JobFieldValue table
-  // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
+  // Combined CE CERT count - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedCeCertCount = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.ceCertCount !== undefined) {
+      return invoiceBreakdown.ceCertCount;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-    // Sum up CE CERT count from JobFieldValue table for all selected jobs
     return selectedJobIds.reduce((total, jobId) => {
       const fieldValue =
         getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
@@ -1578,13 +1518,17 @@ export default function InvoiceCreationPage() {
         getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
       return total + (parseInt(fieldValue) || 0);
     }, 0);
-  }, [selectedJobIds, jobFieldValuesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobFieldValuesMap]);
 
-  // Calculate combined registration charges from all selected jobs
+  // Combined registration charges - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedRegistrationCharges = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.registrationCharges !== undefined) {
+      return invoiceBreakdown.registrationCharges;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-
-    // Sum up registration_other_charges from all selected jobs' service charges
     return selectedJobIds.reduce((total, jobId) => {
       const jobServiceCharge = jobServiceChargesMap[jobId];
       if (jobServiceCharge && jobServiceCharge.registration_other_charges) {
@@ -1594,15 +1538,17 @@ export default function InvoiceCreationPage() {
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobServiceChargesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobServiceChargesMap]);
 
-  // Calculate combined CA charges from all selected jobs
-  // Formula: For each job: (no_of_cac from JobFieldValue * job_service_charges.ca_charges), then sum all
-  // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
+  // Combined CA charges - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedCaCharges = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.caCharges !== undefined) {
+      return invoiceBreakdown.caCharges;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-
-    // Calculate for each job: no_of_cac from JobFieldValue * ca_charges, then sum all
     return selectedJobIds.reduce((total, jobId) => {
       const jobServiceCharge = jobServiceChargesMap[jobId];
       const noOfCacValue =
@@ -1618,15 +1564,17 @@ export default function InvoiceCreationPage() {
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
 
-  // Calculate combined CE charges from all selected jobs
-  // Formula: For each job: (no_of_cec from JobFieldValue * job_service_charges.ce_charges), then sum all
-  // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
+  // Combined CE charges - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedCeCharges = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.ceCharges !== undefined) {
+      return invoiceBreakdown.ceCharges;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return 0;
-
-    // Calculate for each job: no_of_cec from JobFieldValue * ce_charges, then sum all
     return selectedJobIds.reduce((total, jobId) => {
       const jobServiceCharge = jobServiceChargesMap[jobId];
       const noOfCecValue =
@@ -1642,33 +1590,26 @@ export default function InvoiceCreationPage() {
       }
       return total;
     }, 0);
-  }, [selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobServiceChargesMap, jobFieldValuesMap]);
 
-  // Get remi fields from job service charges for the first selected job
-  // Fetch remi_desc and remi_charges from 'job_service_charges' database table according to selected job_id
-  // The data is fetched via API endpoint /jobs/:id/service-charges which queries job_service_charges table filtered by job_id
-  // jobServiceChargesMap is populated in useEffect when selectedJobIds changes (see lines 897-938)
+  // Get remi fields - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const remiFields = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.remiFields && invoiceBreakdown.remiFields.length > 0) {
+      return invoiceBreakdown.remiFields;
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     if (selectedJobIds.length === 0) return [];
 
     const firstJobId = selectedJobIds[0];
-    // Get job service charge data from job_service_charges table (fetched via API)
     const jobServiceCharge = jobServiceChargesMap[firstJobId];
 
     if (!jobServiceCharge) {
-      console.log('[remiFields] No job service charge found for jobId:', firstJobId);
       return [];
     }
 
-    // Debug: Log the complete jobServiceCharge object to see all available fields
-    console.log('[remiFields] Complete jobServiceCharge object:', jobServiceCharge);
-    console.log('[remiFields] Available keys in jobServiceCharge:', Object.keys(jobServiceCharge));
-
     const remiFieldsArray = [];
-
-    // Extract remi_desc and remi_charges from job_service_charges table data
-    // Support both snake_case (remi_one_desc) and camelCase (remiOneDesc) field names
-    // Check each remi field and add if description exists
     const remiFieldsConfig = [
       { 
         desc: "remi_one_desc", 
@@ -1702,113 +1643,49 @@ export default function InvoiceCreationPage() {
       },
     ];
 
-    remiFieldsConfig.forEach((field, configIndex) => {
-      // Get remi_desc and remi_charges from job_service_charges table
-      // IMPORTANT: Ensure we get the description and charges from the SAME remi field pair
-      // Try both snake_case and camelCase field names to handle different API response formats
+    remiFieldsConfig.forEach((field) => {
       const description = jobServiceCharge[field.desc] || jobServiceCharge[field.descCamel];
       const charges = jobServiceCharge[field.charges] || jobServiceCharge[field.chargesCamel];
 
-      // Debug: Log each field pair to verify correct mapping and check all possible field name variations
-      const allPossibleFieldNames = [
-        field.desc,
-        field.descCamel,
-        field.charges,
-        field.chargesCamel,
-        // Also check if Prisma might return different variations
-        field.desc.toLowerCase(),
-        field.desc.toUpperCase(),
-        field.charges.toLowerCase(),
-        field.charges.toUpperCase(),
-      ];
-      
-      const foundFields = {};
-      allPossibleFieldNames.forEach(name => {
-        if (jobServiceCharge[name] !== undefined) {
-          foundFields[name] = jobServiceCharge[name];
-        }
-      });
-
-      console.log(`[remiFields] Processing remi field ${configIndex + 1}:`, {
-        fieldConfig: field,
-        description: description,
-        descriptionRaw: jobServiceCharge[field.desc],
-        descriptionCamel: jobServiceCharge[field.descCamel],
-        charges: charges,
-        chargesRaw: jobServiceCharge[field.charges],
-        chargesCamel: jobServiceCharge[field.chargesCamel],
-        descriptionSource: jobServiceCharge[field.desc] ? 'snake_case' : (jobServiceCharge[field.descCamel] ? 'camelCase' : 'not found'),
-        chargesSource: jobServiceCharge[field.charges] ? 'snake_case' : (jobServiceCharge[field.chargesCamel] ? 'camelCase' : 'not found'),
-        allFoundFields: foundFields,
-      });
-
-      // Check if description exists and is not null/empty
       if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-        // Parse charges - handle both string and number formats
-        // IMPORTANT: remi_charges is stored as VARCHAR(255) in database, so it comes as a string
-        // IMPORTANT: Ensure charges correspond to the SAME remi field as the description
-        // e.g., remi_one_desc should pair with remi_one_charges, not remi_two_charges
         let parsedCharges = 0;
-        
-        // Check if charges exist and are not null/empty/null string
         const chargesStr = charges !== null && charges !== undefined ? String(charges).trim() : "";
         const isChargesEmpty = chargesStr === "" || chargesStr.toUpperCase() === "NULL" || chargesStr === "null";
         
         if (!isChargesEmpty) {
-          // Parse the charges value - remi_charges is VARCHAR so it's always a string
-          // Try direct parseFloat first (handles "237.80", "670", etc.)
           let numValue = parseFloat(chargesStr);
-          
-          // If parseFloat fails, try cleaning the string (remove non-numeric except dots and minus)
           if (isNaN(numValue) || !isFinite(numValue)) {
-            // Remove all characters except digits, dots, and minus signs
             const cleanedStr = chargesStr.replace(/[^\d.-]/g, '');
             numValue = parseFloat(cleanedStr);
           }
-          
-          // Final check - if still NaN, set to 0
           parsedCharges = (isNaN(numValue) || !isFinite(numValue)) ? 0 : numValue;
-          
-          console.log(`[remiFields] Parsed charges for "${description}":`, {
-            descriptionField: field.desc,
-            chargesField: field.charges,
-            originalCharges: charges,
-            chargesString: chargesStr,
-            chargesType: typeof charges,
-            parsedValue: parsedCharges,
-            isNaN: isNaN(parsedCharges),
-            isFinite: isFinite(parsedCharges)
-          });
-        } else {
-          console.warn(`[remiFields] Description found but charges missing/null/empty for "${description}"`, {
-            descriptionField: field.desc,
-            chargesField: field.charges,
-            chargesValue: charges,
-            chargesString: chargesStr,
-            isChargesEmpty: isChargesEmpty
-          });
         }
 
-        // Store the remi field with its corresponding description and charges pair
         remiFieldsArray.push({
           description: String(description).trim(),
           charges: parsedCharges,
-          fieldName: field.charges, // Store the original field name (e.g., "remi_one_charges")
-          fieldIndex: configIndex, // Store the index to maintain order
+          fieldName: field.charges,
         });
       }
     });
 
-    console.log('[remiFields] Extracted remi fields:', remiFieldsArray);
     return remiFieldsArray;
-  }, [selectedJobIds, jobServiceChargesMap]);
+  }, [invoiceBreakdown, selectedJobIds, jobServiceChargesMap]);
 
-  // Calculate combined remi charges
+  // Combined remi charges - uses client-side calculation for partial invoice breakdown, API for sample invoice
   const combinedRemiCharges = useMemo(() => {
+    // Use API response if available (for sample invoice), otherwise use client-side calculation
+    if (invoiceBreakdown?.remiCharges) {
+      return Object.values(invoiceBreakdown.remiCharges).reduce((total, val) => {
+        return total + parseFloat(val || 0);
+      }, 0);
+    }
+    
+    // Client-side calculation for partial invoice breakdown
     return remiFields.reduce((total, remiField) => {
       return total + remiField.charges;
     }, 0);
-  }, [remiFields]);
+  }, [invoiceBreakdown, remiFields]);
 
   // Get GST type from first selected job's service charge
   const selectedGstType = useMemo(() => {
@@ -1820,29 +1697,51 @@ export default function InvoiceCreationPage() {
     return jobServiceCharge?.gst_type || null;
   }, [selectedJobIds, jobServiceChargesMap]);
 
-  // Calculate tax amounts and totals for sample invoice
+  // Calculate tax amounts and totals for sample invoice - now uses API response
   const invoiceCalculations = useMemo(() => {
+    if (invoiceBreakdown) {
+      // Use API response for all calculations
+      const gst = invoiceBreakdown.gst || {};
+      const total = invoiceBreakdown.finalAmount || 0;
+
+      return {
+        baseAmount: invoiceBreakdown.professionalCharges || 0,
+        subtotal: invoiceBreakdown.serviceSubtotal || 0,
+        // Display rates: Always show the base rates from gst_rates table (based on SAC No)
+        cgstRate: gst.cgstRate || 0,
+        sgstRate: gst.sgstRate || 0,
+        igstRate: gst.igstRate || 0,
+        // Calculated amounts: Based on gst_type
+        cgstAmount: gst.cgstAmount || 0,
+        sgstAmount: gst.sgstAmount || 0,
+        igstAmount: gst.igstAmount || 0,
+        applicationFees: invoiceBreakdown.applicationFees || 0,
+        remiCharges: Object.values(invoiceBreakdown.remiCharges || {}).reduce((sum, val) => sum + parseFloat(val || 0), 0),
+        total,
+        totalInWords: numberToWords(total),
+      };
+    }
+
+    // Fallback to client-side calculation if API response not available
     const baseAmount = parseFloat(finalAmount) || 0;
     const registrationCharges = parseFloat(combinedRegistrationCharges) || 0;
     const caCharges = parseFloat(combinedCaCharges) || 0;
     const ceCharges = parseFloat(combinedCeCharges) || 0;
-    const rewardDiscountAmount =
-      parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0;
+    const rewardAmount = parseFloat(invoiceCalculation.reward_amount || 0) || 0;
+    const discountAmount = parseFloat(invoiceCalculation.discount_amount || 0) || 0;
 
-    // Calculate subtotal: baseAmount + all charges + reward
     const subtotal =
       baseAmount +
       registrationCharges +
       caCharges +
       ceCharges +
-      rewardDiscountAmount;
+      rewardAmount -
+      discountAmount;
 
-    // Get GST rates from selected job code's gstRate relation (from gst_rates table based on SAC No)
     const baseCgstRate = selectedGstRates.cgstRate || 0;
     const baseSgstRate = selectedGstRates.sgstRate || 0;
     const baseIgstRate = selectedGstRates.igstRate || 0;
 
-    // Apply GST based on gst_type from job_service_charges
     let cgstRate = 0;
     let sgstRate = 0;
     let igstRate = 0;
@@ -1851,7 +1750,6 @@ export default function InvoiceCreationPage() {
     let igstAmount = 0;
 
     if (selectedGstType === "SC") {
-      // State/Central GST: Apply CGST and SGST, IGST = 0
       cgstRate = baseCgstRate;
       sgstRate = baseSgstRate;
       igstRate = 0;
@@ -1859,7 +1757,6 @@ export default function InvoiceCreationPage() {
       sgstAmount = (subtotal * sgstRate) / 100;
       igstAmount = 0;
     } else if (selectedGstType === "I") {
-      // Interstate GST: Apply only IGST, CGST = 0, SGST = 0
       cgstRate = 0;
       sgstRate = 0;
       igstRate = baseIgstRate;
@@ -1867,7 +1764,6 @@ export default function InvoiceCreationPage() {
       sgstAmount = 0;
       igstAmount = (subtotal * igstRate) / 100;
     } else if (selectedGstType === "EXEMPTED") {
-      // Exempted: No GST applied, all rates = 0
       cgstRate = 0;
       sgstRate = 0;
       igstRate = 0;
@@ -1875,22 +1771,16 @@ export default function InvoiceCreationPage() {
       sgstAmount = 0;
       igstAmount = 0;
     } else {
-      // Default: If gst_type is not set or null, use the rates from gst_rates table
-      // Apply CGST and SGST if available, otherwise IGST
       cgstRate = baseCgstRate;
       sgstRate = baseSgstRate;
       igstRate = baseIgstRate;
       cgstAmount = (subtotal * cgstRate) / 100;
       sgstAmount = (subtotal * sgstRate) / 100;
-      // If both CGST and SGST are present, IGST should be 0, otherwise use IGST
       igstAmount =
         cgstRate > 0 || sgstRate > 0 ? 0 : (subtotal * igstRate) / 100;
     }
 
-    // Application fees (reimbursement) - sum of appl_fee_duty_paid from all selected jobs
     const applicationFees = combinedApplicationFees;
-
-    // Remi charges (reimbursement) - sum of all remi charges from job service charges
     const remiCharges = combinedRemiCharges;
 
     const total =
@@ -1904,11 +1794,9 @@ export default function InvoiceCreationPage() {
     return {
       baseAmount,
       subtotal,
-      // Display rates: Always show the base rates from gst_rates table (based on SAC No)
       cgstRate: baseCgstRate,
       sgstRate: baseSgstRate,
       igstRate: baseIgstRate,
-      // Calculated amounts: Based on gst_type
       cgstAmount,
       sgstAmount,
       igstAmount,
@@ -1919,13 +1807,15 @@ export default function InvoiceCreationPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    invoiceBreakdown,
     finalAmount,
     combinedApplicationFees,
     combinedRegistrationCharges,
     combinedCaCharges,
     combinedCeCharges,
     combinedRemiCharges,
-    invoiceCalculation.rewardDiscountAmount,
+    invoiceCalculation.reward_amount,
+    invoiceCalculation.discount_amount,
     selectedGstRates,
     selectedGstType,
   ]);
@@ -1937,16 +1827,17 @@ export default function InvoiceCreationPage() {
     const registrationCharges = parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0);
     const caCharges = parseFloat(partialInvoiceBreakdown.caCert.payAmt || 0);
     const ceCharges = parseFloat(partialInvoiceBreakdown.ceCert.payAmt || 0);
-    const rewardDiscountAmount =
-      parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0;
+    const rewardAmount = parseFloat(invoiceCalculation.reward_amount || 0) || 0;
+    const discountAmount = parseFloat(invoiceCalculation.discount_amount || 0) || 0;
 
-    // Calculate subtotal: baseAmount + all charges + reward
+    // Calculate subtotal: baseAmount + all charges + reward - discount
     const subtotal =
       baseAmount +
       registrationCharges +
       caCharges +
       ceCharges +
-      rewardDiscountAmount;
+      rewardAmount -
+      discountAmount;
 
     // Get GST rates from selected job code's gstRate relation (from gst_rates table based on SAC No)
     const baseCgstRate = selectedGstRates.cgstRate || 0;
@@ -2036,7 +1927,8 @@ export default function InvoiceCreationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     partialInvoiceBreakdown,
-    invoiceCalculation.rewardDiscountAmount,
+    invoiceCalculation.reward_amount,
+    invoiceCalculation.discount_amount,
     selectedGstRates,
     selectedGstType,
   ]);
@@ -2050,11 +1942,16 @@ export default function InvoiceCreationPage() {
     return `${day}-${month}-${year}`;
   }, []);
 
-  // Function to show sample invoice inline
-  const handleShowSampleInvoice = () => {
-    // Close the calculation modal and show sample invoice
-    setShowInvoiceModal(false);
-    setShowSampleInvoice(true);
+  // Function to show sample invoice inline - fetches API data first
+  const handleShowSampleInvoice = async () => {
+    // Fetch invoice breakdown from API first
+    const success = await fetchInvoiceBreakdown();
+    
+    if (success) {
+      // Close the calculation modal and show sample invoice
+      setShowInvoiceModal(false);
+      setShowSampleInvoice(true);
+    }
   };
 
   // Function to save invoice to database
@@ -2138,9 +2035,7 @@ export default function InvoiceCreationPage() {
           parseFloat(remiChargesMap["remi_three_charges"] || 0) +
           parseFloat(remiChargesMap["remi_four_charges"] || 0) +
           parseFloat(remiChargesMap["remi_five_charges"] || 0) +
-          (parseFloat(invoiceCalculation.rewardDiscountAmount || 0) < 0
-            ? parseFloat(invoiceCalculation.rewardDiscountAmount || 0)
-            : 0)
+          -parseFloat(invoiceCalculation.discount_amount || 0)
         );
       } else if (billingType === "Service") {
         // For Service: Only Service section fields (Subtotal + GST)
@@ -2150,7 +2045,8 @@ export default function InvoiceCreationPage() {
           parseFloat(registrationCharges || 0) +
           parseFloat(caCharges || 0) +
           parseFloat(ceCharges || 0) +
-          parseFloat(invoiceCalculation.rewardDiscountAmount || 0)
+          parseFloat(invoiceCalculation.reward_amount || 0) -
+          parseFloat(invoiceCalculation.discount_amount || 0)
         );
         // Add GST amounts
         const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
@@ -2212,12 +2108,12 @@ export default function InvoiceCreationPage() {
               ? String(remiChargesMap["remi_five_charges"])
               : null),
         // Reward/Discount - only store if displayed (Service or Service & Reimbursement)
-        reward_penalty_input: billingType === "Reimbursement" 
-          ? "0" 
-          : (invoiceCalculation.rewardDiscountPercent || "0"),
-        reward_penalty_amount: billingType === "Reimbursement"
+        reward_amount: billingType === "Reimbursement"
           ? 0
-          : (parseFloat(invoiceCalculation.rewardDiscountAmount || 0) || 0),
+          : (parseFloat(invoiceCalculation.reward_amount || 0) || 0),
+        discount_amount: billingType === "Reimbursement"
+          ? 0
+          : (parseFloat(invoiceCalculation.discount_amount || 0) || 0),
         note: sampleInvoiceData.note || null,
         po_no: sampleInvoiceData.poNo || null,
         irn_no: sampleInvoiceData.irnNo || null,
@@ -2275,10 +2171,10 @@ export default function InvoiceCreationPage() {
 
   // Prepare invoice data for sample invoice
   const sampleInvoiceData = useMemo(() => {
-    // Use Pay Amt values if they exist, otherwise use full amounts
+    // Use Pay Amt values if they exist, otherwise use base amount (without reward/discount)
     const professionalCharges = hasPayAmtValues
       ? parseFloat(partialInvoiceBreakdown.professionalCharges.payAmt || 0)
-      : parseFloat(finalAmount || 0);
+      : parseFloat(invoiceCalculation.amount || 0);
     const registrationCharges = hasPayAmtValues
       ? parseFloat(partialInvoiceBreakdown.registrationCharges.payAmt || 0)
       : parseFloat(combinedRegistrationCharges || 0);
@@ -2291,6 +2187,14 @@ export default function InvoiceCreationPage() {
     const applicationFees = hasPayAmtValues
       ? parseFloat(partialInvoiceBreakdown.applicationFees.payAmt || 0)
       : parseFloat(combinedApplicationFees || 0);
+
+    // Use API response for reward/discount amounts if available, otherwise use client-side values
+    const rewardAmount = invoiceBreakdown?.rewardAmount !== undefined
+      ? invoiceBreakdown.rewardAmount
+      : parseFloat(invoiceCalculation.reward_amount || 0);
+    const discountAmount = invoiceBreakdown?.discountAmount !== undefined
+      ? invoiceBreakdown.discountAmount
+      : parseFloat(invoiceCalculation.discount_amount || 0);
 
     return {
       account: sessionAccount,
@@ -2309,7 +2213,8 @@ export default function InvoiceCreationPage() {
       chargesAsUnder: "NA",
       amount: invoiceCalculation.amount || "0",
       finalAmount: professionalCharges,
-      rewardDiscountAmount: invoiceCalculation.rewardDiscountAmount || "0",
+      reward_amount: rewardAmount,
+      discount_amount: discountAmount,
       registrationCharges: registrationCharges.toFixed(2),
       caCertCount: 0,
       ceCertCount: 0,
@@ -2332,13 +2237,15 @@ export default function InvoiceCreationPage() {
     selectedSacNo,
     invoiceCalculation.amount,
     finalAmount,
-    invoiceCalculation.rewardDiscountAmount,
+    invoiceCalculation.reward_amount,
+    invoiceCalculation.discount_amount,
     combinedRegistrationCharges,
     combinedCaCharges,
     combinedCeCharges,
     combinedApplicationFees,
     partialInvoiceBreakdown,
     hasPayAmtValues,
+    invoiceBreakdown,
   ]);
 
   return (
@@ -2784,118 +2691,86 @@ export default function InvoiceCreationPage() {
                 </div>
               </div>
 
-              {/* Reward/Discount Section */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Reward/Discount (%)
+              {/* Reward/Discount Toggle */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Type
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="rewardDiscountType"
+                      value="reward"
+                      checked={rewardDiscountType === "reward"}
+                      onChange={(e) => {
+                        setRewardDiscountType(e.target.value);
+                        // Clear the other type's values when switching
+                        if (e.target.value === "reward") {
+                          setInvoiceCalculation((prev) => ({
+                            ...prev,
+                            discount_amount: "",
+                          }));
+                        } else {
+                          setInvoiceCalculation((prev) => ({
+                            ...prev,
+                            reward_amount: "",
+                          }));
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Reward</span>
                   </label>
-                  <input
-                    type="text"
-                    value={invoiceCalculation.rewardDiscountPercent}
-                    onChange={handleRewardDiscountPercentChange}
-                    onBlur={(e) => {
-                      // On blur, ensure proper formatting
-                      const value = e.target.value.trim();
-                      if (value === "" || value === "+" || value === "-") {
-                        setInvoiceCalculation((prev) => ({
-                          ...prev,
-                          rewardDiscountPercent: "",
-                          rewardDiscountAmount: "",
-                        }));
-                        setRewardDiscountErrors((prev) => ({
-                          ...prev,
-                          percent: "",
-                        }));
-                        return;
-                      }
-
-                      const sign = value.startsWith("-") ? "-" : "+";
-                      const numericPart = value.replace(/[+-]/g, "");
-                      let numericValue = parseFloat(numericPart);
-
-                      if (isNaN(numericValue)) {
-                        return;
-                      }
-
-                      // Validate: should not exceed 100 (absolute value)
-                      if (numericValue > 100) {
-                        setRewardDiscountErrors((prev) => ({
-                          ...prev,
-                          percent: "Percentage cannot exceed 100%",
-                        }));
-                        numericValue = 100;
-                      } else {
-                        setRewardDiscountErrors((prev) => ({
-                          ...prev,
-                          percent: "",
-                        }));
-                      }
-
-                      // Clamp value between 0 and 100 (absolute value)
-                      numericValue = Math.max(0, Math.min(100, numericValue));
-                      const signedValue =
-                        sign === "-" ? -numericValue : numericValue;
-                      const formattedValue =
-                        signedValue >= 0
-                          ? `+${numericValue.toFixed(2)}`
-                          : `-${numericValue.toFixed(2)}`;
-
-                      const baseAmount =
-                        parseFloat(invoiceCalculation.amount) || 0;
-                      const calculatedAmount =
-                        (baseAmount * Math.abs(numericValue)) / 100;
-                      const rewardDiscountAmount =
-                        signedValue >= 0 ? calculatedAmount : -calculatedAmount;
-
-                      setInvoiceCalculation((prev) => ({
-                        ...prev,
-                        rewardDiscountPercent: formattedValue,
-                        rewardDiscountAmount:
-                          baseAmount > 0 ? rewardDiscountAmount.toFixed(2) : "",
-                      }));
-                    }}
-                    onWheel={(e) => e.target.blur()}
-                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                      rewardDiscountErrors.percent
-                        ? "border-red-500 focus:border-red-500"
-                        : "border-gray-300 focus:border-primary-500"
-                    }`}
-                    placeholder="Enter + for Reward, - for Discount (Range: -100 to +100)"
-                  />
-                  {rewardDiscountErrors.percent ? (
-                    <p className="text-xs text-red-500 mt-1">
-                      {rewardDiscountErrors.percent}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Range: -100% to +100% | +0.01 to +100 = Reward, -0.01 to
-                      -100 = Discount | Supports 2 decimal places
-                    </p>
-                  )}
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="rewardDiscountType"
+                      value="discount"
+                      checked={rewardDiscountType === "discount"}
+                      onChange={(e) => {
+                        setRewardDiscountType(e.target.value);
+                        // Clear the other type's values when switching
+                        if (e.target.value === "reward") {
+                          setInvoiceCalculation((prev) => ({
+                            ...prev,
+                            discount_amount: "",
+                          }));
+                        } else {
+                          setInvoiceCalculation((prev) => ({
+                            ...prev,
+                            reward_amount: "",
+                          }));
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Discount</span>
+                  </label>
                 </div>
+              </div>
 
+              {/* Reward/Discount Section */}
+              {rewardDiscountType === "reward" ? (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Reward/Discount Amount
+                    Reward Amount
                   </label>
                   <input
                     ref={rewardDiscountAmountInputRef}
-                    type="text"
+                    type="number"
+                    step="0.01"
+                    min="0"
                     inputMode="decimal"
-                    value={invoiceCalculation.rewardDiscountAmount || ""}
+                    value={invoiceCalculation.reward_amount || ""}
                     onChange={handleRewardDiscountAmountChange}
                     onBlur={(e) => {
-                      // Clear typing flag
                       isTypingRewardDiscountRef.current = false;
-
-                      // Ensure value is formatted to 2 decimal places on blur
                       const value = e.target.value.trim();
-                      if (value === "") {
+                      if (value === "" || value === ".") {
                         setInvoiceCalculation((prev) => ({
                           ...prev,
-                          rewardDiscountAmount: "",
-                          rewardDiscountPercent: "",
+                          reward_amount: "",
                         }));
                         setRewardDiscountErrors((prev) => ({
                           ...prev,
@@ -2905,55 +2780,39 @@ export default function InvoiceCreationPage() {
                       }
 
                       let numericValue = parseFloat(value);
-                      if (!isNaN(numericValue)) {
-                        numericValue = Math.round(numericValue * 100) / 100;
-
-                        // Recalculate percentage if base amount exists
-                        const baseAmount =
-                          parseFloat(invoiceCalculation.amount) || 0;
-                        if (baseAmount > 0) {
-                          // Validate: amount should not exceed base amount (absolute value)
-                          if (Math.abs(numericValue) > baseAmount) {
-                            setRewardDiscountErrors((prev) => ({
-                              ...prev,
-                              amount: `Amount cannot exceed base amount of ${baseAmount.toFixed(
-                                2
-                              )}`,
-                            }));
-                            // Clamp the value to base amount
-                            numericValue =
-                              numericValue >= 0 ? baseAmount : -baseAmount;
-                          } else {
-                            setRewardDiscountErrors((prev) => ({
-                              ...prev,
-                              amount: "",
-                            }));
-                          }
-
-                          const calculatedPercent =
-                            (Math.abs(numericValue) / baseAmount) * 100;
-                          // Clamp percentage between 0 and 100 (absolute value)
-                          const clampedPercent = Math.max(
-                            0,
-                            Math.min(100, calculatedPercent)
-                          );
-                          const formattedPercent =
-                            numericValue >= 0
-                              ? `+${clampedPercent.toFixed(2)}`
-                              : `-${clampedPercent.toFixed(2)}`;
-
-                          setInvoiceCalculation((prev) => ({
-                            ...prev,
-                            rewardDiscountAmount: numericValue.toFixed(2),
-                            rewardDiscountPercent: formattedPercent,
-                          }));
-                        } else {
-                          setInvoiceCalculation((prev) => ({
-                            ...prev,
-                            rewardDiscountAmount: numericValue.toFixed(2),
-                          }));
-                        }
+                      if (isNaN(numericValue) || numericValue < 0) {
+                        setInvoiceCalculation((prev) => ({
+                          ...prev,
+                          reward_amount: "",
+                        }));
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "Please enter a valid amount (>= 0)",
+                        }));
+                        return;
                       }
+
+                      // Ensure non-negative and round to 2 decimal places
+                      numericValue = Math.max(0, Math.round(numericValue * 100) / 100);
+                      const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
+                      
+                      if (baseAmount > 0 && numericValue > baseAmount) {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: `Amount cannot exceed base amount of ${baseAmount.toFixed(2)}`,
+                        }));
+                        numericValue = baseAmount;
+                      } else {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "",
+                        }));
+                      }
+
+                      setInvoiceCalculation((prev) => ({
+                        ...prev,
+                        reward_amount: numericValue.toFixed(2),
+                      }));
                     }}
                     onWheel={(e) => e.target.blur()}
                     className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
@@ -2973,7 +2832,88 @@ export default function InvoiceCreationPage() {
                     </p>
                   )}
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Discount Amount
+                  </label>
+                  <input
+                    ref={rewardDiscountAmountInputRef}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    value={invoiceCalculation.discount_amount || ""}
+                    onChange={handleRewardDiscountAmountChange}
+                    onBlur={(e) => {
+                      isTypingRewardDiscountRef.current = false;
+                      const value = e.target.value.trim();
+                      if (value === "" || value === ".") {
+                        setInvoiceCalculation((prev) => ({
+                          ...prev,
+                          discount_amount: "",
+                        }));
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "",
+                        }));
+                        return;
+                      }
+
+                      let numericValue = parseFloat(value);
+                      if (isNaN(numericValue) || numericValue < 0) {
+                        setInvoiceCalculation((prev) => ({
+                          ...prev,
+                          discount_amount: "",
+                        }));
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "Please enter a valid amount (>= 0)",
+                        }));
+                        return;
+                      }
+
+                      // Ensure non-negative and round to 2 decimal places
+                      numericValue = Math.max(0, Math.round(numericValue * 100) / 100);
+                      const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
+                      
+                      if (baseAmount > 0 && numericValue > baseAmount) {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: `Amount cannot exceed base amount of ${baseAmount.toFixed(2)}`,
+                        }));
+                        numericValue = baseAmount;
+                      } else {
+                        setRewardDiscountErrors((prev) => ({
+                          ...prev,
+                          amount: "",
+                        }));
+                      }
+
+                      setInvoiceCalculation((prev) => ({
+                        ...prev,
+                        discount_amount: numericValue.toFixed(2),
+                      }));
+                    }}
+                    onWheel={(e) => e.target.blur()}
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      rewardDiscountErrors.amount
+                        ? "border-red-500 focus:border-red-500"
+                        : "border-gray-300 focus:border-primary-500"
+                    }`}
+                    placeholder="0.00"
+                  />
+                  {rewardDiscountErrors.amount ? (
+                    <p className="text-xs text-red-500 mt-1">
+                      {rewardDiscountErrors.amount}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">
+                      2 decimal places only | Cannot exceed base amount
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Modal Footer */}
@@ -2988,6 +2928,7 @@ export default function InvoiceCreationPage() {
           </div>
         </div>
       )}
+
 
       {/* Partial Invoice Details Modal */}
       {showPartialInvoiceModal && (
@@ -3535,9 +3476,7 @@ export default function InvoiceCreationPage() {
                 </div>
                 <div className="flex justify-end">
                   <button
-                    onClick={() => {
-                      setShowSampleInvoice(true);
-                    }}
+                    onClick={handleShowSampleInvoice}
                     className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 font-medium"
                   >
                     Show Sample INV
@@ -3763,10 +3702,7 @@ export default function InvoiceCreationPage() {
                       {billingType === "Reimbursement" && calculations
                         ? (
                             parseFloat(calculations.applicationFees || 0) +
-                            parseFloat(calculations.remiCharges || 0) +
-                            (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
-                              ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                              : 0)
+                            parseFloat(calculations.remiCharges || 0)
                           ).toFixed(2)
                         : parseFloat(
                             sampleInvoiceData.finalAmount ||
@@ -3901,28 +3837,26 @@ export default function InvoiceCreationPage() {
                   <div className="text-xs grid grid-cols-12">
                     {billingType !== "Reimbursement" && (
                       <>
-                        {parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) >
+                        {parseFloat(sampleInvoiceData.reward_amount || 0) >
                           0 && (
                           <>
                             <div className="col-span-9">Reward </div>
                             <div className="col-span-1">₹</div>
                             <div className="col-span-2 text-right">
                               {parseFloat(
-                                sampleInvoiceData.rewardDiscountAmount || 0
+                                sampleInvoiceData.reward_amount || 0
                               ).toFixed(2)}
                             </div>
                           </>
                         )}
-                        {/* Show discount if rewardDiscountAmount is negative and no remi fields exist */}
-                        {parseFloat(
-                          sampleInvoiceData.rewardDiscountAmount || 0
-                        ) < 0 && (
+                        {parseFloat(sampleInvoiceData.discount_amount || 0) >
+                          0 && (
                           <>
                             <div className="col-span-9">Discount </div>
                             <div className="col-span-1">₹</div>
                             <div className="col-span-2 text-right">
                               {parseFloat(
-                                sampleInvoiceData.rewardDiscountAmount || 0
+                                sampleInvoiceData.discount_amount || 0
                               ).toFixed(2)}
                             </div>
                           </>
@@ -3970,17 +3904,7 @@ export default function InvoiceCreationPage() {
                         <div className="col-span-9 font-semibold">Subtotal </div>
                         <div className="col-span-1 font-semibold">₹</div>
                         <div className="col-span-2 text-right font-semibold">
-                          {(
-                            parseFloat(
-                              sampleInvoiceData.finalAmount ||
-                                sampleInvoiceData.amount ||
-                                0
-                            ) +
-                            parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                            parseFloat(sampleInvoiceData.caCharges || 0) +
-                            parseFloat(sampleInvoiceData.ceCharges || 0) +
-                            parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                          ).toFixed(2)}
+                          {calculateServiceSubtotal().toFixed(2)}
                         </div>
                         {calculations && (
                           <>
@@ -4072,34 +3996,19 @@ export default function InvoiceCreationPage() {
                               // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
                               return (
                                 parseFloat(calculations.applicationFees || 0) +
-                                parseFloat(calculations.remiCharges || 0) +
-                                (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
-                                  ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                                  : 0)
+                                parseFloat(calculations.remiCharges || 0)
                               ).toFixed(2);
                             } else if (billingType === "Service") {
                               // For Service: Only Service section fields (Subtotal + GST)
                               // Calculate subtotal from displayed Service fields
-                              const serviceSubtotal = (
-                                parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
-                                parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                                parseFloat(sampleInvoiceData.caCharges || 0) +
-                                parseFloat(sampleInvoiceData.ceCharges || 0) +
-                                parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                              );
+                              const serviceSubtotal = calculateServiceSubtotal();
                               // Add GST amounts
                               const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
                               return (serviceSubtotal + gstTotal).toFixed(2);
                             } else {
                               // For Service & Reimbursement: Calculate total from displayed values
                               // Calculate displayed subtotal (same as shown on screen)
-                              const displayedSubtotal = (
-                                parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
-                                parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                                parseFloat(sampleInvoiceData.caCharges || 0) +
-                                parseFloat(sampleInvoiceData.ceCharges || 0) +
-                                parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                              );
+                              const displayedSubtotal = calculateServiceSubtotal();
                               
                               // Add GST amounts (as displayed)
                               const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
@@ -4144,33 +4053,18 @@ export default function InvoiceCreationPage() {
                         // For Reimbursement: Application Fees + Remi Charges + (negative discount if any)
                         totalAmount =
                           parseFloat(calculations.applicationFees || 0) +
-                          parseFloat(calculations.remiCharges || 0) +
-                          (parseFloat(sampleInvoiceData.rewardDiscountAmount || 0) < 0
-                            ? parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                            : 0);
+                          parseFloat(calculations.remiCharges || 0);
                       } else if (billingType === "Service") {
                         // For Service: Only Service section fields (Subtotal + GST)
                         // Calculate subtotal from displayed Service fields
-                        const serviceSubtotal = (
-                          parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
-                          parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                          parseFloat(sampleInvoiceData.caCharges || 0) +
-                          parseFloat(sampleInvoiceData.ceCharges || 0) +
-                          parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                        );
+                        const serviceSubtotal = calculateServiceSubtotal();
                         // Add GST amounts
                         const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
                         totalAmount = serviceSubtotal + gstTotal;
                       } else {
                         // For Service & Reimbursement: Calculate total from displayed values
                         // Calculate displayed subtotal (same as shown on screen)
-                        const displayedSubtotal = (
-                          parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0) +
-                          parseFloat(sampleInvoiceData.registrationCharges || 0) +
-                          parseFloat(sampleInvoiceData.caCharges || 0) +
-                          parseFloat(sampleInvoiceData.ceCharges || 0) +
-                          parseFloat(sampleInvoiceData.rewardDiscountAmount || 0)
-                        );
+                        const displayedSubtotal = calculateServiceSubtotal();
                         
                         // Add GST amounts (as displayed)
                         const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
