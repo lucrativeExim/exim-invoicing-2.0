@@ -7,11 +7,18 @@
     "dev": "nodemon server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "migrate": "node scripts/run_migration.js",
+    "migrate:single": "node scripts/run_single_migration.js",
     "prisma:generate": "prisma generate",
     "prisma:g": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status",
     "prisma:studio": "prisma studio",
-    "prisma:format": "prisma format"
+    "prisma:format": "prisma format",
+    "prisma:pull": "prisma db pull",
+    "setup:db": "node scripts/setup_database.js",
+    "setup:admin": "node scripts/create_admin_user.js",
+    "copy:data": "node scripts/copy_data_from_exim.js"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +31,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
     "mysql2": "^3.15.3"
   },
   "devDependencies": {

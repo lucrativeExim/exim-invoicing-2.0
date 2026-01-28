@@ -139,6 +139,7 @@ class JobRegisterFieldModel {
 
   /**
    * Create new active record and mark old ones as inactive
+   * Also updates jobs with status='In_process' to point to the new record
    */
   async createAndDeactivateOld(data) {
     const {
@@ -150,6 +151,19 @@ class JobRegisterFieldModel {
 
     // Use a transaction to ensure atomicity
     return await prisma.$transaction(async (tx) => {
+      // First, get the IDs of existing active records before marking them as inactive
+      const oldActiveRecords = await tx.jobRegisterField.findMany({
+        where: {
+          job_register_id: parseInt(job_register_id),
+          status: 'Active',
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const oldRecordIds = oldActiveRecords.map(record => record.id);
+
       // Mark all existing active records as inactive
       await tx.jobRegisterField.updateMany({
         where: {
@@ -180,6 +194,25 @@ class JobRegisterFieldModel {
           added_by: true,
         },
       });
+
+      // Update jobs with status='In_process' that reference the old records
+      // Only update jobs where job_register_field_id matches one of the old inactive records
+      // Jobs with status='Closed' should NOT be updated
+      if (oldRecordIds.length > 0) {
+        await tx.job.updateMany({
+          where: {
+            job_register_field_id: {
+              in: oldRecordIds,
+            },
+            status: 'In_process',
+            deleted_at: null, // Only update non-deleted jobs
+          },
+          data: {
+            job_register_field_id: newRecord.id,
+            updated_at: new Date(),
+          },
+        });
+      }
 
       return newRecord;
     });

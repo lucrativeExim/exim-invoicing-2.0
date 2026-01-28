@@ -5,32 +5,31 @@ import { useRouter } from 'next/navigation';
 import { authService } from '@/services/authService';
 import { accessControl } from '@/services/accessControl';
 import { Button } from '@/components/formComponents';
+import TableSearch from '@/components/TableSearch';
+import { useTableSearch } from '@/hooks/useTableSearch';
+import { usePagination } from '@/hooks/usePagination';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
-import UserForm from './UserForm';
 import api from '@/services/api';
+import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import Pagination from '@/components/Pagination';
 
 export default function UsersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [jobRegisters, setJobRegisters] = useState([]);
-  const [jobRegistersLoading, setJobRegistersLoading] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingUserId, setEditingUserId] = useState(null);
-  const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    password: '',
-    mobile: '',
-    user_role: '',
-    authority: [],
-    job_register_ids: [],
-  });
-  const [errors, setErrors] = useState({});
   const { toast, success, error: showError, hideToast } = useToast();
+
+  // Search functionality
+  const searchFields = ['first_name', 'last_name', 'email', 'mobile', 'user_role'];
+  const { searchTerm, setSearchTerm, filteredData: filteredUsers, suggestions } = useTableSearch(
+    users,
+    searchFields
+  );
+
+  // Pagination
+  const pagination = usePagination(filteredUsers, { itemsPerPage: 10 });
 
   const fetchUsers = useCallback(async () => {
     setUsersLoading(true);
@@ -45,19 +44,6 @@ export default function UsersPage() {
     }
   }, [showError]);
 
-  const fetchJobRegisters = useCallback(async () => {
-    setJobRegistersLoading(true);
-    try {
-      const response = await api.get('/job-register?activeOnly=true');
-      setJobRegisters(response.data);
-    } catch (err) {
-      console.error('Error fetching job registers:', err);
-      showError(err.response?.data?.error || 'Failed to fetch job registers');
-    } finally {
-      setJobRegistersLoading(false);
-    }
-  }, [showError]);
-
   useEffect(() => {
     // Check if user has permission to access this page
     if (!accessControl.canManageUsers()) {
@@ -67,145 +53,12 @@ export default function UsersPage() {
     
     setLoading(false);
 
-    // Fetch users and job registers
+    // Fetch users
     fetchUsers();
-    fetchJobRegisters();
-  }, [router, fetchUsers, fetchJobRegisters]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: '',
-      }));
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-    const isEditing = !!editingUserId;
-
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
-    }
-
-    // Password is only required when creating a new user
-    if (!isEditing && !formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password && formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-
-    if (!formData.user_role) {
-      newErrors.user_role = 'User role is required';
-    }
-
-    if (!formData.authority || formData.authority.length === 0) {
-      newErrors.authority = 'At least one authority is required';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+  }, [router, fetchUsers]);
 
   const handleEdit = (user) => {
-    // Convert comma-separated strings to arrays
-    const authorities = !user.authority 
-      ? [] 
-      : Array.isArray(user.authority)
-        ? user.authority
-        : typeof user.authority === 'string'
-          ? user.authority.split(',').map(a => a.trim()).filter(Boolean)
-          : [];
-
-    const jobRegisterIds = !user.job_register_ids
-      ? []
-      : typeof user.job_register_ids === 'string'
-        ? user.job_register_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
-        : Array.isArray(user.job_register_ids)
-          ? user.job_register_ids.map(id => parseInt(id)).filter(id => !isNaN(id))
-          : [];
-
-    setFormData({
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      email: user.email || '',
-      password: '', // Don't populate password when editing
-      mobile: user.mobile || '',
-      user_role: user.user_role || '',
-      authority: authorities,
-      job_register_ids: jobRegisterIds,
-    });
-    setEditingUserId(user.id);
-    setShowAddForm(true);
-    setErrors({});
-  };
-
-  const resetForm = () => {
-    setShowAddForm(false);
-    setEditingUserId(null);
-    setFormData({
-      first_name: '',
-      last_name: '',
-      email: '',
-      password: '',
-      mobile: '',
-      user_role: '',
-      authority: [],
-      job_register_ids: [],
-    });
-    setErrors({});
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!validateForm()) {
-      return;
-    }
-
-    try {
-      const isEditing = !!editingUserId;
-      
-      // Convert authority array to comma-separated string for backend
-      // job_register_ids should be sent as array (will be converted to string in backend)
-      const submitData = {
-        ...formData,
-        authority: Array.isArray(formData.authority) 
-          ? formData.authority.join(',') 
-          : formData.authority,
-        job_register_ids: Array.isArray(formData.job_register_ids) 
-          ? formData.job_register_ids 
-          : [],
-      };
-
-      // Remove password if it's empty when editing
-      if (isEditing && !submitData.password) {
-        delete submitData.password;
-      }
-
-      if (isEditing) {
-        await api.put(`/users/${editingUserId}`, submitData);
-        success('User updated successfully');
-      } else {
-        await api.post('/users', submitData);
-        success('User created successfully');
-      }
-      
-      resetForm();
-      fetchUsers();
-    } catch (err) {
-      console.error(`Error ${editingUserId ? 'updating' : 'creating'} user:`, err);
-      showError(err.response?.data?.error || `Failed to ${editingUserId ? 'update' : 'create'} user`);
-    }
+    router.push(`/dashboard/control-room/users/edit/${user.id}`);
   };
 
   const formatUserRole = (role) => {
@@ -250,57 +103,53 @@ export default function UsersPage() {
       )}
 
       {/* Page Header */}
-      <div className="mb-6 flex items-center justify-between">
-            <div>
+      <div className="mb-2 flex items-center justify-end">
+            {/* <div>
               <h1 className="text-2xl font-bold text-gray-900 mb-1">Users</h1>
               <p className="text-sm text-gray-600">Manage system users and their access</p>
-            </div>
+            </div> */}
             <Button
-              onClick={() => {
-                if (showAddForm) {
-                  resetForm();
-                } else {
-                  setShowAddForm(true);
-                  setEditingUserId(null);
-                }
-              }}
+              onClick={() => router.push('/dashboard/control-room/users/add')}
               variant="primary"
             >
-              {showAddForm ? 'Cancel' : 'Add New User'}
+              Add New User
             </Button>
           </div>
 
-      {/* Add/Edit User Form */}
-      {showAddForm && (
-        <UserForm
-          formData={formData}
-          errors={errors}
-          editingUserId={editingUserId}
-          jobRegisters={jobRegisters}
-          jobRegistersLoading={jobRegistersLoading}
-          onChange={handleChange}
-          onSubmit={handleSubmit}
-          onCancel={resetForm}
-        />
-      )}
-
       {/* Users Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">All Users</h2>
+              <div className="w-80">
+                <TableSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  suggestions={suggestions}
+                  placeholder="Search users..."
+                  data={users}
+                  searchFields={searchFields}
+                  maxSuggestions={5}
+                  storageKey="users"
+                />
+              </div>
             </div>
             {usersLoading ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                 <p className="mt-2 text-gray-600">Loading users...</p>
               </div>
-            ) : users.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No users found</div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {searchTerm ? 'No users match your search' : 'No users found'}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Name
                       </th>
@@ -322,14 +171,24 @@ export default function UsersPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Created At
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {users.map((userItem) => (
+                    {pagination.paginatedData.map((userItem) => (
                       <tr key={userItem.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(userItem)}
+                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
+                            title="Edit"
+                            aria-label="Edit user"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
                             {userItem.first_name} {userItem.last_name}
@@ -386,28 +245,23 @@ export default function UsersPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {userItem.created_at
-                            ? new Date(userItem.created_at).toLocaleDateString()
-                            : 'N/A'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button
-                            type="button"
-                            onClick={() => handleEdit(userItem)}
-                            className="p-1.5 rounded-md hover:bg-blue-50 transition-colors text-blue-600"
-                            title="Edit"
-                            aria-label="Edit user"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
+                          {formatDateDDMMYYYY(userItem.created_at)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
+            {!usersLoading && filteredUsers.length > 0 && (
+              <Pagination
+                currentPage={pagination.currentPage}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.totalItems}
+                itemsPerPage={pagination.itemsPerPage}
+                onPageChange={pagination.setCurrentPage}
+                onItemsPerPageChange={pagination.setItemsPerPage}
+              />
             )}
           </div>
     </>

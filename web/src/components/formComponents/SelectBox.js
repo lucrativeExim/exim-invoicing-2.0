@@ -142,6 +142,11 @@ const SelectBox = ({
       borderRadius: '0.5rem',
       boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
       fontSize: '0.875rem',
+      zIndex: 9999,
+    }),
+    menuPortal: (base) => ({
+      ...base,
+      zIndex: 9999,
     }),
     option: (base, state) => {
       // For multi-select, use lighter background for selected items
@@ -192,6 +197,9 @@ const SelectBox = ({
         components={isMulti ? { Option: CustomOption } : undefined}
         styles={customStyles}
         classNamePrefix="react-select"
+        menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+        menuPosition="fixed"
+        menuShouldScrollIntoView={true}
         {...props}
       />
       {error && <p className="mt-0.5 text-xs text-red-600">{error}</p>}

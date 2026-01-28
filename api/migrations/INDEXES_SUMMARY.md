@@ -87,8 +87,8 @@ All foreign key columns are indexed for optimal join performance:
 - `idx_job_register_id` on `job_register_id`
 - `idx_added_by` on `added_by`
 - `idx_canceled_by` on `canceled_by`
-- `idx_performa_created_by` on `performa_created_by`
-- `idx_performa_canceled_by` on `performa_canceled_by`
+- `idx_proforma_created_by` on `proforma_created_by`
+- `idx_proforma_canceled_by` on `proforma_canceled_by`
 
 #### invoice_selected_jobs table
 - `idx_invoice_id` on `invoice_id`
@@ -160,7 +160,7 @@ Indexed for faster searches and lookups:
 
 #### invoices table
 - `idx_draft_view_id` on `draft_view_id` - For draft invoice lookups
-- `idx_performa_view_id` on `performa_view_id` - For performa invoice lookups
+- `idx_proforma_view_id` on `proforma_view_id` - For proforma invoice lookups
 - `idx_po_no` on `po_no` - For PO number searches
 - `idx_irn_no` on `irn_no` - For IRN number lookups
 
@@ -207,7 +207,7 @@ Indexed for date range queries and sorting:
 Indexed for filtering:
 
 #### job table
-- `idx_invoice_ready` on `invoice_ready` - For filtering invoice-ready jobs
+- `idx_invoice_type` on `invoice_type` - For filtering jobs by invoice type
 
 ## Performance Benefits
 

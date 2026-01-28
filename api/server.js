@@ -1,3 +1,7 @@
+// Set application default timezone to IST (Asia/Kolkata)
+// Database stores dates in UTC, but application uses IST for display/logging
+process.env.TZ = 'Asia/Kolkata';
+
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
@@ -17,8 +21,78 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
+// Body parsing middleware - skip for multipart/form-data (multer handles it)
+app.use((req, res, next) => {
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('multipart/form-data')) {
+    // Skip body parsing for multipart - multer will handle it
+    return next();
+  }
+  next();
+});
+
+// Apply body parsers for non-multipart requests
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  
+  // Store original methods
+  const originalEnd = res.end;
+  const originalWrite = res.write;
+  let responseSize = 0;
+  
+  // Override write method to capture response chunks
+  res.write = function(chunk, encoding) {
+    if (chunk) {
+      responseSize += Buffer.byteLength(chunk, encoding);
+    }
+    return originalWrite.call(this, chunk, encoding);
+  };
+  
+  // Override end method to capture final response size and log
+  res.end = function(chunk, encoding) {
+    if (chunk) {
+      responseSize += Buffer.byteLength(chunk, encoding);
+    }
+    
+    // Calculate time taken
+    const timeTaken = Date.now() - startTime;
+    
+    // Format timestamp in IST without timezone indicator
+    const now = new Date();
+    // Get IST time string and parse it
+    const istString = now.toLocaleString('en-US', { 
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    // Format: MM/DD/YYYY, HH:MM:SS -> YYYY-MM-DDTHH:MM:SS
+    const [datePart, timePart] = istString.split(', ');
+    const [month, day, year] = datePart.split('/');
+    const timestamp = `${year}-${month}-${day}T${timePart}`;
+    
+    // Format response size
+    const sizeStr = responseSize < 1024 ? `${responseSize}b` : `${(responseSize / 1024).toFixed(1)}kb`;
+    
+    // Log in format: timestamp method url timeTaken size
+    const method = req.method.toLowerCase();
+    const url = req.originalUrl || req.url;
+    console.log(`${timestamp} ${method} ${url} ${timeTaken}ms ${sizeStr}`);
+    
+    // Call original end method
+    originalEnd.call(this, chunk, encoding);
+  };
+  
+  next();
+});
 
 // Test database connection with Prisma
 (async () => {
@@ -48,6 +122,21 @@ const clientBuRoutes = require('./routes/client-bu');
 const clientServiceChargesRoutes = require('./routes/client-service-charges');
 const statesRoutes = require('./routes/states');
 const jobsRoutes = require('./routes/jobs');
+const jobAttachmentsRoutes = require('./routes/job-attachments');
+const jobAttachmentsFilesRoutes = require('./routes/job-attachments-files');
+
+// Log route registration for debugging
+console.log('📦 Loading routes...');
+
+// Load invoices route with error handling
+let invoicesRoutes;
+try {
+  invoicesRoutes = require('./routes/invoices');
+  console.log('✅ Invoices route loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading invoices route:', error);
+  console.error(error.stack);
+}
 
 app.use('/api/users', usersRoutes);
 app.use('/api/auth', authRoutes);
@@ -61,6 +150,16 @@ app.use('/api/client-bu', clientBuRoutes);
 app.use('/api/client-service-charges', clientServiceChargesRoutes);
 app.use('/api/states', statesRoutes);
 app.use('/api/jobs', jobsRoutes);
+app.use('/api/job-attachments', jobAttachmentsRoutes);
+app.use('/api/job-attachments-files', jobAttachmentsFilesRoutes);
+
+// Register invoices route with error handling
+if (invoicesRoutes && typeof invoicesRoutes === 'function') {
+  app.use('/api/invoices', invoicesRoutes);
+  console.log('✅ Invoices route registered at /api/invoices');
+} else {
+  console.error('❌ Invoices route not registered - route must export a router');
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {

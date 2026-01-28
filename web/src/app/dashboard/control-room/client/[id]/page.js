@@ -16,6 +16,7 @@ export default function ClientProfilePage() {
   const [clientBus, setClientBus] = useState([]);
   const [serviceCharges, setServiceCharges] = useState([]);
   const [expandedBu, setExpandedBu] = useState({});
+  const [ownerName, setOwnerName] = useState(null);
   const { toast, error: showError, hideToast } = useToast();
 
   useEffect(() => {
@@ -47,6 +48,21 @@ export default function ClientProfilePage() {
       setClientInfo(clientResponse.data);
       setClientBus(busResponse.data || []);
       setServiceCharges(chargesResponse.data || []);
+      
+      // Fetch owner user name if client_owner_ship exists
+      if (clientResponse.data?.client_owner_ship) {
+        try {
+          const ownerResponse = await api.get(`/users/${clientResponse.data.client_owner_ship}`);
+          const owner = ownerResponse.data;
+          const fullName = [owner.first_name, owner.last_name].filter(Boolean).join(' ').trim();
+          setOwnerName(fullName || 'N/A');
+        } catch (err) {
+          console.error('Error fetching owner user:', err);
+          setOwnerName('N/A');
+        }
+      } else {
+        setOwnerName(null);
+      }
       
       // Store client name in sessionStorage for header display
       if (typeof window !== 'undefined' && clientResponse.data?.client_name) {
@@ -150,7 +166,7 @@ export default function ClientProfilePage() {
           </div>
           <div>
             <label className="text-sm font-medium text-gray-500">Owner</label>
-            <p className="text-sm text-gray-900 mt-1">{clientInfo.client_owner_ship || 'N/A'}</p>
+            <p className="text-sm text-gray-900 mt-1">{ownerName !== null ? ownerName : (clientInfo.client_owner_ship || 'N/A')}</p>
           </div>
           <div>
             <label className="text-sm font-medium text-gray-500">Status</label>

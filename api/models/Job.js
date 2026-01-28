@@ -1,4 +1,6 @@
 const prisma = require('../lib/prisma');
+const JobRegisterField = require('./JobRegisterField');
+const JobFieldValue = require('./JobFieldValue');
 
 class JobModel {
   /**
@@ -12,148 +14,77 @@ class JobModel {
 
   /**
    * Get all valid Job model column names (excluding id, timestamps, and relations)
+   * Note: Dynamic form fields are now stored in JobFieldValue table
    */
   static getValidJobColumns() {
     return [
-      'job_register_id', 'job_no', 'job_register_field_id', 'client_info_id', 'client_bu_id', 'type_of_unit',
-      'job_owner', 'job_owner_email_id', 'job_owner_phone_no',
-      'processor', 'processor_email_id', 'processor_phone_no',
-      'port', 'claim_no', 'po_no', 'quantity', 'description_of_quantity',
-      'job_date', 'application_target_date', 'application_date',
-      'application', 'claim_amount_after_finalization',
-      'appl_fee_duty_paid', 'appl_fees_reference_no', 'app_fees_payt_date',
-      'eft_attachment', 'bank_name', 'application_ref_no', 'application_ref_date',
-      'cac', 'cac_attachment', 'cec', 'cec_attachment', 'no_of_cac', 'no_of_cec',
-      'submission_target_date', 'submission_date',
-      'acknowlegment', 'submitted_to', 'file_no', 'file_date',
-      'job_verification_target_date', 'job_verification_date',
-      'sanction_approval_target_date', 'sanction___approval_date',
-      'authorisation_no', 'duty_credit_scrip_no', 'license_no',
-      'certificate_no', 'refund_sanction_order_no', 'brand_rate_letter_no',
-      'lic_scrip_order_cert_amendment_no', 'date',
-      'refund_order_license_approval_brl_certificate_attachment',
-      'duty_credit_refund_sanctioned_exempted_amount',
-      'license_registration_target_date', 'license_registration_date',
-      'import_date', 'actual_duty_credit_refund_sanctioned_amount',
-      'normal_retro', 'cus_clearance', 'type_of_ims', 'bis', 'ims', 'scomet',
-      'inv_no', 'inv_date', 'dbk_claim_no', 'dbk_claim_date',
-      'ref__no', 'ref__date', 'remark', 'status', 'invoice_ready',
+      'job_register_id', 'job_no', 'job_register_field_id', 'client_info_id', 'client_bu_id', 
+      'job_owner_id',
+      'processor_id','job_date',
+      'remark', 'status', 'invoice_type', 'billing_type',
       'job_id_status', 'added_by', 'deleted_by',
     ];
   }
 
   /**
-   * Map form_field_json_data to Job model columns
-   * Extracts fields from form_field_json_data JSON string and maps them to valid Job columns
-   * @param {string|object} formFieldJsonData - JSON string or parsed object from form_field_json_data
-   * @returns {object} - Mapped data with only valid Job columns
+   * Extract form field values from form data
+   * Returns an object with field_name as key and field_value as value
+   * @param {object} formData - Form data object
+   * @param {object} jobRegisterField - JobRegisterField object with form_fields_json
+   * @returns {object} - Object with field names and values
    */
-  static mapFormFieldsToJobColumns(formFieldJsonData) {
-    const mappedData = {};
+  static extractFormFieldValues(formData, jobRegisterField) {
+    const fieldValues = {};
     
-    if (!formFieldJsonData) {
-      return mappedData;
+    if (!formData || !jobRegisterField || !jobRegisterField.form_fields_json) {
+      return fieldValues;
     }
 
-    // Parse JSON string if needed
-    let formFields = {};
-    try {
-      if (typeof formFieldJsonData === 'string') {
-        formFields = JSON.parse(formFieldJsonData);
-      } else if (typeof formFieldJsonData === 'object') {
-        formFields = formFieldJsonData;
-      } else {
-        return mappedData;
+    // Parse form_fields_json if it's a string
+    let formFields = jobRegisterField.form_fields_json;
+    if (typeof formFields === 'string') {
+      try {
+        formFields = JSON.parse(formFields);
+      } catch (error) {
+        console.error('Error parsing form_fields_json:', error);
+        return fieldValues;
       }
-    } catch (error) {
-      console.error('Error parsing form_field_json_data:', error);
-      return mappedData;
     }
 
-    // Get valid Job columns
-    const validColumns = this.getValidJobColumns();
-    
-    // List of date fields
-    const dateFields = [
-      'job_date', 'application_target_date', 'application_date',
-      'app_fees_payt_date', 'application_ref_date', 'cac', 'cec',
-      'submission_target_date', 'submission_date', 'file_date',
-      'job_verification_target_date', 'job_verification_date',
-      'sanction_approval_target_date', 'sanction___approval_date',
-      'license_registration_target_date', 'license_registration_date',
-      'import_date', 'inv_date', 'dbk_claim_date', 'ref__date',
-    ];
-
-    // List of phone number fields (stored as Float)
-    const phoneFields = ['job_owner_phone_no', 'processor_phone_no'];
-
-    // Helper function to parse date strings
-    const parseDate = (dateValue) => {
-      if (!dateValue) return null;
-      if (dateValue instanceof Date) return dateValue;
-      const parsed = new Date(dateValue);
-      return isNaN(parsed.getTime()) ? null : parsed;
-    };
-
-    // Iterate through form fields and map to Job columns
-    Object.keys(formFields).forEach((fieldKey) => {
-      const value = formFields[fieldKey];
-      
-      // Skip empty values
-      if (value === '' || value === null || value === undefined) {
-        return;
-      }
-
-      // Check if the field key matches a valid Job column
-      if (validColumns.includes(fieldKey)) {
-        // Handle date fields
-        if (dateFields.includes(fieldKey)) {
-          const dateValue = parseDate(value);
-          if (dateValue) {
-            mappedData[fieldKey] = dateValue;
-          }
-        }
-        // Handle phone number fields
-        else if (phoneFields.includes(fieldKey)) {
-          const phoneValue = parseFloat(value);
-          if (!isNaN(phoneValue)) {
-            mappedData[fieldKey] = phoneValue;
-          }
-        }
-        // Handle regular fields
-        else {
-          mappedData[fieldKey] = value;
-        }
-      }
-      // If field key doesn't match, try to convert field name to column name
-      // This handles cases where form might send field names like "Processor" instead of "processor"
-      else {
-        const normalizedKey = this.getFieldKey(fieldKey);
-        if (normalizedKey && validColumns.includes(normalizedKey)) {
-          // Handle date fields
-          if (dateFields.includes(normalizedKey)) {
-            const dateValue = parseDate(value);
-            if (dateValue) {
-              mappedData[normalizedKey] = dateValue;
+    // If formFields is an array, extract field names
+    if (Array.isArray(formFields)) {
+      formFields.forEach((field) => {
+        if (field.name) {
+          const fieldKey = JobModel.getFieldKey(field.name);
+          if (fieldKey && formData[fieldKey] !== undefined && formData[fieldKey] !== null && formData[fieldKey] !== '') {
+            // Convert value to string for storage
+            let value = formData[fieldKey];
+            if (value instanceof Date) {
+              value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+            } else {
+              value = String(value);
             }
-          }
-          // Handle phone number fields
-          else if (phoneFields.includes(normalizedKey)) {
-            const phoneValue = parseFloat(value);
-            if (!isNaN(phoneValue)) {
-              mappedData[normalizedKey] = phoneValue;
-            }
-          }
-          // Handle regular fields
-          else {
-            mappedData[normalizedKey] = value;
+            fieldValues[field.name] = value;
           }
         }
-        // If field doesn't match any valid column, ignore it (as per requirement)
-      }
-    });
+      });
+    } else if (typeof formFields === 'object') {
+      // If formFields is an object, use it directly
+      Object.keys(formFields).forEach((fieldKey) => {
+        const value = formFields[fieldKey];
+        if (value !== undefined && value !== null && value !== '') {
+          let stringValue = value;
+          if (value instanceof Date) {
+            stringValue = value.toISOString().split('T')[0];
+          } else {
+            stringValue = String(value);
+          }
+          fieldValues[fieldKey] = stringValue;
+        }
+      });
+    }
 
-    return mappedData;
+    return fieldValues;
   }
   /**
    * Get all jobs
@@ -163,7 +94,7 @@ class JobModel {
       includeDeleted = false,
       jobRegisterId = null,
       status = null,
-      invoiceReady = null,
+      invoiceType = null,
       jobIdStatus = null,
     } = options;
 
@@ -183,11 +114,11 @@ class JobModel {
       where.status = status;
     }
     
-    if (invoiceReady) {
-      where.invoice_ready = invoiceReady;
+    if (invoiceType) {
+      where.invoice_type = invoiceType;
     }
 
-    return await prisma.job.findMany({
+    const jobs = await prisma.job.findMany({
       where,
       include: {
         jobRegister: {
@@ -233,8 +164,52 @@ class JobModel {
             client_name: true,
           },
         },
+        jobFieldValues: {
+          orderBy: { field_name: 'asc' },
+        },
+        invoiceSelectedJobs: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                invoice_status: true,
+                invoice_stage_status: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
+    });
+
+    // Add canDelete, canEdit, and canAddAttachment flags to each job
+    // A job cannot be deleted if it exists in invoice_selected_jobs 
+    // with an invoice that has invoice_status = 'Active' AND (invoice_stage_status = 'Draft' OR invoice_stage_status = 'Proforma')
+    // A job cannot be edited or have attachments added if it exists in invoice_selected_jobs 
+    // with an invoice that has invoice_status = 'Active' AND invoice_stage_status = 'Proforma'
+    return jobs.map(job => {
+      const hasActiveDraftInvoice = job.invoiceSelectedJobs.some(
+        isj => isj.invoice && 
+               isj.invoice.invoice_status === 'Active' && 
+               isj.invoice.invoice_stage_status === 'Draft'
+      );
+      
+      const hasActiveProformaInvoice = job.invoiceSelectedJobs.some(
+        isj => isj.invoice && 
+               isj.invoice.invoice_status === 'Active' && 
+               isj.invoice.invoice_stage_status === 'Proforma'
+      );
+      
+      const canDelete = !hasActiveDraftInvoice && !hasActiveProformaInvoice;
+      const canEdit = !hasActiveProformaInvoice;
+      const canAddAttachment = !hasActiveProformaInvoice;
+      
+      return {
+        ...job,
+        canDelete,
+        canEdit,
+        canAddAttachment,
+      };
     });
   }
 
@@ -262,6 +237,9 @@ class JobModel {
         jobRegisterField: {
           select: {
             id: true,
+            form_fields_json: true,
+            job_register_id: true,
+            status: true,
           },
         },
         clientInfo: {
@@ -290,6 +268,9 @@ class JobModel {
             status: { not: 'Delete' },
           },
         },
+        jobFieldValues: {
+          orderBy: { field_name: 'asc' },
+        },
       },
     });
   }
@@ -304,189 +285,207 @@ class JobModel {
       job_register_field_id,
       client_info_id,
       client_bu_id,
-      type_of_unit,
-      job_owner,
-      job_owner_email_id,
-      job_owner_phone_no,
-      processor,
-      processor_email_id,
-      processor_phone_no,
-      port,
-      claim_no,
-      po_no,
-      quantity,
-      description_of_quantity,
+      job_owner_id,
+      processor_id,
       job_date,
-      application_target_date,
-      application_date,
-      application,
-      claim_amount_after_finalization,
-      appl_fee_duty_paid,
-      appl_fees_reference_no,
-      app_fees_payt_date,
-      eft_attachment,
-      bank_name,
-      application_ref_no,
-      application_ref_date,
-      cac,
-      cac_attachment,
-      cec,
-      cec_attachment,
-      no_of_cac,
-      no_of_cec,
-      submission_target_date,
-      submission_date,
-      acknowlegment,
-      submitted_to,
-      file_no,
-      file_date,
-      job_verification_target_date,
-      job_verification_date,
-      sanction_approval_target_date,
-      sanction___approval_date,
-      authorisation_no,
-      duty_credit_scrip_no,
-      license_no,
-      certificate_no,
-      refund_sanction_order_no,
-      brand_rate_letter_no,
-      lic_scrip_order_cert_amendment_no,
-      date,
-      refund_order_license_approval_brl_certificate_attachment,
-      duty_credit_refund_sanctioned_exempted_amount,
-      license_registration_target_date,
-      license_registration_date,
-      import_date,
-      actual_duty_credit_refund_sanctioned_amount,
-      normal_retro,
-      cus_clearance,
-      type_of_ims,
-      bis,
-      ims,
-      scomet,
-      inv_no,
-      inv_date,
-      dbk_claim_no,
-      dbk_claim_date,
-      ref__no,
-      ref__date,
       remark,
       status,
-      invoice_ready,
+      invoice_type,
       form_field_json_data,
       job_id_status,
       added_by,
     } = data;
 
-    // Helper function to parse date strings
-    const parseDate = (dateValue) => {
-      if (!dateValue) return null;
-      if (dateValue instanceof Date) return dateValue;
-      const parsed = new Date(dateValue);
-      return isNaN(parsed.getTime()) ? null : parsed;
-    };
+    // Use a transaction to ensure atomicity
+    return await prisma.$transaction(async (tx) => {
+      // Fetch JobRegisterField to get form_fields_json structure
+      let jobRegisterField = null;
+      if (job_register_field_id) {
+        jobRegisterField = await tx.jobRegisterField.findUnique({
+          where: { id: parseInt(job_register_field_id) },
+        });
+      }
 
-    // Map form_field_json_data to Job columns
-    const mappedFormFields = JobModel.mapFormFieldsToJobColumns(form_field_json_data);
+      // Extract dynamic fields (ending with _dynamic) from data
+      const dynamicFields = {};
+      const baseDataFields = {};
+      
+      // List of known non-field properties to exclude
+      const excludeKeys = ['job_service_charges'];
+      
+      // Separate dynamic fields from regular fields
+      Object.keys(data).forEach(key => {
+        // Skip excluded keys
+        if (excludeKeys.includes(key)) {
+          return;
+        }
+        
+        if (key.endsWith('_dynamic')) {
+          // Remove _dynamic suffix and store the original field name
+          const originalFieldName = key.slice(0, -8); // Remove '_dynamic' (8 characters)
+          const value = data[key];
+          // Only include non-empty values
+          if (value !== '' && value !== null && value !== undefined) {
+            dynamicFields[originalFieldName] = value;
+          }
+        } else {
+          // Regular field - include in baseDataFields if it's a valid Job column
+          baseDataFields[key] = data[key];
+        }
+      });
 
-    // Prepare base data with explicit fields (these take precedence over mapped fields)
-    const baseData = {
-      job_register_id: job_register_id ? parseInt(job_register_id) : null,
-      job_no: job_no || null,
-      job_register_field_id: job_register_field_id ? parseInt(job_register_field_id) : null,
-      client_info_id: client_info_id ? parseInt(client_info_id) : null,
-      client_bu_id: client_bu_id ? parseInt(client_bu_id) : null,
-      type_of_unit: type_of_unit || null,
-      job_owner: job_owner || null,
-      job_owner_email_id: job_owner_email_id || null,
-      job_owner_phone_no: job_owner_phone_no ? parseFloat(job_owner_phone_no) : null,
-      processor: processor || null,
-      processor_email_id: processor_email_id || null,
-      processor_phone_no: processor_phone_no ? parseFloat(processor_phone_no) : null,
-      port: port || null,
-      claim_no: claim_no || null,
-      po_no: po_no || null,
-      quantity: quantity || null,
-      description_of_quantity: description_of_quantity || null,
-      job_date: parseDate(job_date),
-      application_target_date: parseDate(application_target_date),
-      application_date: parseDate(application_date),
-      application: application || null,
-      claim_amount_after_finalization: claim_amount_after_finalization || null,
-      appl_fee_duty_paid: appl_fee_duty_paid || null,
-      appl_fees_reference_no: appl_fees_reference_no || null,
-      app_fees_payt_date: parseDate(app_fees_payt_date),
-      eft_attachment: eft_attachment || null,
-      bank_name: bank_name || null,
-      application_ref_no: application_ref_no || null,
-      application_ref_date: parseDate(application_ref_date),
-      cac: parseDate(cac),
-      cac_attachment: cac_attachment || null,
-      cec: parseDate(cec),
-      cec_attachment: cec_attachment || null,
-      no_of_cac: no_of_cac || null,
-      no_of_cec: no_of_cec || null,
-      submission_target_date: parseDate(submission_target_date),
-      submission_date: parseDate(submission_date),
-      acknowlegment: acknowlegment || null,
-      submitted_to: submitted_to || null,
-      file_no: file_no || null,
-      file_date: parseDate(file_date),
-      job_verification_target_date: parseDate(job_verification_target_date),
-      job_verification_date: parseDate(job_verification_date),
-      sanction_approval_target_date: parseDate(sanction_approval_target_date),
-      sanction___approval_date: parseDate(sanction___approval_date),
-      authorisation_no: authorisation_no || null,
-      duty_credit_scrip_no: duty_credit_scrip_no || null,
-      license_no: license_no || null,
-      certificate_no: certificate_no || null,
-      refund_sanction_order_no: refund_sanction_order_no || null,
-      brand_rate_letter_no: brand_rate_letter_no || null,
-      lic_scrip_order_cert_amendment_no: lic_scrip_order_cert_amendment_no || null,
-      date: date || null,
-      refund_order_license_approval_brl_certificate_attachment: refund_order_license_approval_brl_certificate_attachment || null,
-      duty_credit_refund_sanctioned_exempted_amount: duty_credit_refund_sanctioned_exempted_amount || null,
-      license_registration_target_date: parseDate(license_registration_target_date),
-      license_registration_date: parseDate(license_registration_date),
-      import_date: parseDate(import_date),
-      actual_duty_credit_refund_sanctioned_amount: actual_duty_credit_refund_sanctioned_amount || null,
-      normal_retro: normal_retro || null,
-      cus_clearance: cus_clearance || null,
-      type_of_ims: type_of_ims || null,
-      bis: bis || null,
-      ims: ims || null,
-      scomet: scomet || null,
-      inv_no: inv_no || null,
-      inv_date: parseDate(inv_date),
-      dbk_claim_no: dbk_claim_no || null,
-      dbk_claim_date: parseDate(dbk_claim_date),
-      ref__no: ref__no || null,
-      ref__date: parseDate(ref__date),
-      remark: remark || null,
-      status: status || null,
-      invoice_ready: invoice_ready || null,
-      job_id_status: job_id_status || 'Active',
-      added_by: added_by ? parseInt(added_by) : null,
-    };
+      // Prepare base data with only valid Job columns (excluding dynamic fields)
+      const baseData = {
+        job_register_id: baseDataFields.job_register_id ? parseInt(baseDataFields.job_register_id) : null,
+        job_no: baseDataFields.job_no || null,
+        job_register_field_id: baseDataFields.job_register_field_id ? parseInt(baseDataFields.job_register_field_id) : null,
+        client_info_id: baseDataFields.client_info_id ? parseInt(baseDataFields.client_info_id) : null,
+        client_bu_id: baseDataFields.client_bu_id ? parseInt(baseDataFields.client_bu_id) : null,
+        job_owner_id: baseDataFields.job_owner_id || null,
+        processor_id: baseDataFields.processor_id || null,
+        job_date: baseDataFields.job_date || null,
+        remark: baseDataFields.remark || null,
+        status: baseDataFields.status || null,
+        invoice_type: baseDataFields.invoice_type || null,
+        billing_type: baseDataFields.billing_type || null,
+        form_field_json_data: form_field_json_data ? (typeof form_field_json_data === 'string' ? form_field_json_data : JSON.stringify(form_field_json_data)) : null,
+        job_id_status: baseDataFields.job_id_status || job_id_status || 'Active',
+        added_by: baseDataFields.added_by ? parseInt(baseDataFields.added_by) : (added_by ? parseInt(added_by) : null),
+      };
 
-    // Merge mapped form fields with base data
-    // Explicit fields in baseData take precedence, mapped fields fill in missing values
-    const finalData = { ...mappedFormFields, ...baseData };
-    
-    // Keep form_field_json_data in final data for reference (optional - remove if not needed)
-    finalData.form_field_json_data = form_field_json_data ? (typeof form_field_json_data === 'string' ? form_field_json_data : JSON.stringify(form_field_json_data)) : null;
-
-    return await prisma.job.create({
-      data: finalData,
-      include: {
-        jobRegister: {
-          select: {
-            id: true,
-            job_title: true,
-            job_code: true,
+      // Create the job
+      const job = await tx.job.create({
+        data: baseData,
+        include: {
+          jobRegister: {
+            select: {
+              id: true,
+              job_title: true,
+              job_code: true,
+            },
           },
         },
-      },
+      });
+
+      // Store dynamic fields in JobFieldValue table
+      console.log('Dynamic fields extracted:', dynamicFields);
+      console.log('JobRegisterField found:', jobRegisterField ? 'Yes' : 'No');
+      
+      if (Object.keys(dynamicFields).length > 0) {
+        const fieldValues = {};
+        
+        if (jobRegisterField && jobRegisterField.form_fields_json) {
+          // Map dynamic field keys to their original field names from form_fields_json
+          // Parse form_fields_json to get field names
+          let formFields = jobRegisterField.form_fields_json;
+          if (typeof formFields === 'string') {
+            try {
+              formFields = JSON.parse(formFields);
+            } catch (error) {
+              console.error('Error parsing form_fields_json:', error);
+              formFields = [];
+            }
+          }
+
+          console.log('Form fields from jobRegisterField:', formFields);
+
+          // Create a map of field keys to field names
+          const fieldKeyToNameMap = {};
+          if (Array.isArray(formFields)) {
+            formFields.forEach((field) => {
+              if (field.name) {
+                const fieldKey = JobModel.getFieldKey(field.name);
+                if (fieldKey) {
+                  fieldKeyToNameMap[fieldKey] = field.name;
+                }
+              }
+            });
+          }
+
+          console.log('Field key to name map:', fieldKeyToNameMap);
+
+          // Map dynamic fields to their original field names
+          Object.keys(dynamicFields).forEach(fieldKey => {
+            const fieldName = fieldKeyToNameMap[fieldKey] || fieldKey;
+            let value = dynamicFields[fieldKey];
+            
+            // Convert value to string for storage
+            if (value instanceof Date) {
+              value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+            } else {
+              value = String(value);
+            }
+            
+            fieldValues[fieldName] = value;
+          });
+        } else {
+          // If jobRegisterField is not available, use field keys directly as field names
+          console.log('JobRegisterField not available, using field keys directly');
+          Object.keys(dynamicFields).forEach(fieldKey => {
+            let value = dynamicFields[fieldKey];
+            
+            // Convert value to string for storage
+            if (value instanceof Date) {
+              value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+            } else {
+              value = String(value);
+            }
+            
+            fieldValues[fieldKey] = value;
+          });
+        }
+
+        console.log('Field values to save:', fieldValues);
+
+        // Store field values in JobFieldValue table
+        if (Object.keys(fieldValues).length > 0) {
+          await JobFieldValue.upsertMany(job.id, fieldValues, tx);
+          console.log('JobFieldValue saved successfully for job:', job.id);
+        } else {
+          console.log('No field values to save');
+        }
+      } else {
+        console.log('No dynamic fields found');
+      }
+
+      // Also handle form_field_json_data if provided (for backward compatibility)
+      if (jobRegisterField && form_field_json_data) {
+        // Parse form_field_json_data if it's a string
+        let formData = form_field_json_data;
+        if (typeof formData === 'string') {
+          try {
+            formData = JSON.parse(formData);
+          } catch (error) {
+            console.error('Error parsing form_field_json_data:', error);
+            formData = {};
+          }
+        }
+
+        // Extract field values using the helper method
+        const fieldValues = JobModel.extractFormFieldValues(formData, jobRegisterField);
+
+        // Store field values in JobFieldValue table
+        if (Object.keys(fieldValues).length > 0) {
+          await JobFieldValue.upsertMany(job.id, fieldValues, tx);
+        }
+      }
+
+      // Fetch job with field values
+      const jobWithFields = await tx.job.findUnique({
+        where: { id: job.id },
+        include: {
+          jobRegister: {
+            select: {
+              id: true,
+              job_title: true,
+              job_code: true,
+            },
+          },
+          jobFieldValues: true,
+        },
+      });
+
+      return jobWithFields;
     });
   }
 
@@ -494,108 +493,204 @@ class JobModel {
    * Update job
    */
   async update(id, data) {
-    const updateData = {};
+    // Use a transaction to ensure atomicity
+    return await prisma.$transaction(async (tx) => {
+      const updateData = {};
 
-    // Helper function to parse date strings
-    const parseDate = (dateValue) => {
-      if (!dateValue) return null;
-      if (dateValue instanceof Date) return dateValue;
-      const parsed = new Date(dateValue);
-      return isNaN(parsed.getTime()) ? null : parsed;
-    };
-
-    // Map form_field_json_data to Job columns if provided
-    let mappedFormFields = {};
-    if (data.form_field_json_data !== undefined) {
-      mappedFormFields = JobModel.mapFormFieldsToJobColumns(data.form_field_json_data);
-    }
-
-    // Map all possible fields
-    const fields = [
-      'job_register_id', 'job_no', 'job_register_field_id', 'client_info_id', 'client_bu_id', 'type_of_unit',
-      'job_owner', 'job_owner_email_id', 'job_owner_phone_no',
-      'processor', 'processor_email_id', 'processor_phone_no',
-      'port', 'claim_no', 'po_no', 'quantity', 'description_of_quantity',
-      'application', 'claim_amount_after_finalization',
-      'appl_fee_duty_paid', 'appl_fees_reference_no',
-      'eft_attachment', 'bank_name', 'application_ref_no',
-      'cac_attachment', 'cec_attachment', 'no_of_cac', 'no_of_cec',
-      'acknowlegment', 'submitted_to', 'file_no',
-      'authorisation_no', 'duty_credit_scrip_no', 'license_no',
-      'certificate_no', 'refund_sanction_order_no', 'brand_rate_letter_no',
-      'lic_scrip_order_cert_amendment_no', 'date',
-      'refund_order_license_approval_brl_certificate_attachment',
-      'duty_credit_refund_sanctioned_exempted_amount',
-      'actual_duty_credit_refund_sanctioned_amount',
-      'normal_retro', 'cus_clearance', 'type_of_ims', 'bis', 'ims', 'scomet',
-      'inv_no', 'dbk_claim_no', 'ref__no', 'remark', 'status', 'invoice_ready',
-      'form_field_json_data', 'job_id_status',
-    ];
-
-    const dateFields = [
-      'job_date', 'application_target_date', 'application_date',
-      'app_fees_payt_date', 'application_ref_date', 'cac', 'cec',
-      'submission_target_date', 'submission_date', 'file_date',
-      'job_verification_target_date', 'job_verification_date',
-      'sanction_approval_target_date', 'sanction___approval_date',
-      'license_registration_target_date', 'license_registration_date',
-      'import_date', 'inv_date', 'dbk_claim_date', 'ref__date',
-    ];
-
-    const floatFields = ['job_owner_phone_no', 'processor_phone_no'];
-
-    fields.forEach(field => {
-      if (data[field] !== undefined) {
-        if (field === 'form_field_json_data' && data[field]) {
-          updateData[field] = typeof data[field] === 'string' ? data[field] : JSON.stringify(data[field]);
+      // Extract dynamic fields (ending with _dynamic) from data
+      const dynamicFields = {};
+      const regularData = {};
+      
+      // Separate dynamic fields from regular fields
+      Object.keys(data).forEach(key => {
+        if (key.endsWith('_dynamic')) {
+          // Remove _dynamic suffix and store the original field name
+          const originalFieldName = key.slice(0, -8); // Remove '_dynamic' (8 characters)
+          const value = data[key];
+          // Only include non-empty values
+          if (value !== '' && value !== null && value !== undefined) {
+            dynamicFields[originalFieldName] = value;
+          }
         } else {
-          updateData[field] = data[field] || null;
+          // Regular field
+          regularData[key] = data[key];
+        }
+      });
+
+      // Map only valid Job columns (excluding dynamic fields)
+      const validFields = [
+        'job_register_id', 'job_no', 'job_register_field_id', 'client_info_id', 'client_bu_id', 'type_of_unit',
+        'job_owner', 'job_owner_email_id', 'job_owner_phone_no',
+        'processor', 'processor_email_id', 'processor_phone_no',
+        'job_date', 'remark', 'status', 'invoice_type', 'billing_type', 'form_field_json_data', 'job_id_status',
+      ];
+
+      const floatFields = ['job_owner_phone_no', 'processor_phone_no'];
+
+      validFields.forEach(field => {
+        if (regularData[field] !== undefined) {
+          if (field === 'form_field_json_data' && regularData[field]) {
+            updateData[field] = typeof regularData[field] === 'string' ? regularData[field] : JSON.stringify(regularData[field]);
+          } else {
+            updateData[field] = regularData[field] || null;
+          }
+        }
+      });
+
+      floatFields.forEach(field => {
+        if (regularData[field] !== undefined) {
+          updateData[field] = regularData[field] ? parseFloat(regularData[field]) : null;
+        }
+      });
+
+      if (regularData.job_register_id !== undefined) {
+        updateData.job_register_id = regularData.job_register_id ? parseInt(regularData.job_register_id) : null;
+      }
+      if (regularData.job_register_field_id !== undefined) {
+        updateData.job_register_field_id = regularData.job_register_field_id ? parseInt(regularData.job_register_field_id) : null;
+      }
+      if (regularData.client_info_id !== undefined) {
+        updateData.client_info_id = regularData.client_info_id ? parseInt(regularData.client_info_id) : null;
+      }
+      if (regularData.client_bu_id !== undefined) {
+        updateData.client_bu_id = regularData.client_bu_id ? parseInt(regularData.client_bu_id) : null;
+      }
+
+      // Handle job_date - convert to Date object for Prisma (with time component)
+      if (regularData.job_date !== undefined) {
+        if (regularData.job_date === null || regularData.job_date === '') {
+          updateData.job_date = null;
+        } else {
+          let date;
+          if (regularData.job_date instanceof Date) {
+            date = regularData.job_date;
+          } else if (typeof regularData.job_date === 'string') {
+            // Parse date string (handles both YYYY-MM-DD and ISO DateTime formats)
+            date = new Date(regularData.job_date);
+          } else {
+            date = new Date(regularData.job_date);
+          }
+          if (date && !isNaN(date.getTime())) {
+            // Store Date object with time component (stored as DATETIME in database)
+            updateData.job_date = date;
+          } else {
+            updateData.job_date = null;
+          }
         }
       }
-    });
 
-    dateFields.forEach(field => {
-      if (data[field] !== undefined) {
-        updateData[field] = parseDate(data[field]);
+      updateData.updated_at = new Date();
+
+      // Update the job
+      const job = await tx.job.update({
+        where: { id: parseInt(id) },
+        data: updateData,
+      });
+
+      // Update dynamic fields in JobFieldValue table
+      if (Object.keys(dynamicFields).length > 0) {
+        // Fetch JobRegisterField to get form_fields_json structure
+        let jobRegisterField = null;
+        if (job.job_register_field_id) {
+          jobRegisterField = await tx.jobRegisterField.findUnique({
+            where: { id: job.job_register_field_id },
+          });
+        }
+
+        if (jobRegisterField) {
+          // Parse form_fields_json to get field names
+          let formFields = jobRegisterField.form_fields_json;
+          if (typeof formFields === 'string') {
+            try {
+              formFields = JSON.parse(formFields);
+            } catch (error) {
+              console.error('Error parsing form_fields_json:', error);
+              formFields = [];
+            }
+          }
+
+          // Create a map of field keys to field names
+          const fieldKeyToNameMap = {};
+          if (Array.isArray(formFields)) {
+            formFields.forEach((field) => {
+              if (field.name) {
+                const fieldKey = JobModel.getFieldKey(field.name);
+                if (fieldKey) {
+                  fieldKeyToNameMap[fieldKey] = field.name;
+                }
+              }
+            });
+          }
+
+          // Map dynamic fields to their original field names
+          const fieldValues = {};
+          Object.keys(dynamicFields).forEach(fieldKey => {
+            const fieldName = fieldKeyToNameMap[fieldKey] || fieldKey;
+            let value = dynamicFields[fieldKey];
+            
+            // Convert value to string for storage
+            if (value instanceof Date) {
+              value = value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+            } else {
+              value = String(value);
+            }
+            
+            fieldValues[fieldName] = value;
+          });
+
+          // Update field values in JobFieldValue table
+          if (Object.keys(fieldValues).length > 0) {
+            await JobFieldValue.upsertMany(job.id, fieldValues, tx);
+          }
+        }
       }
-    });
 
-    floatFields.forEach(field => {
-      if (data[field] !== undefined) {
-        updateData[field] = data[field] ? parseFloat(data[field]) : null;
+      // Also handle form_field_json_data if provided (for backward compatibility)
+      if (regularData.form_field_json_data !== undefined && regularData.form_field_json_data) {
+        // Fetch JobRegisterField to get form_fields_json structure
+        let jobRegisterField = null;
+        if (job.job_register_field_id) {
+          jobRegisterField = await tx.jobRegisterField.findUnique({
+            where: { id: job.job_register_field_id },
+          });
+        }
+
+        if (jobRegisterField) {
+          // Parse form_field_json_data if it's a string
+          let formData = regularData.form_field_json_data;
+          if (typeof formData === 'string') {
+            try {
+              formData = JSON.parse(formData);
+            } catch (error) {
+              console.error('Error parsing form_field_json_data:', error);
+              formData = {};
+            }
+          }
+
+          // Extract field values using the helper method
+          const fieldValues = JobModel.extractFormFieldValues(formData, jobRegisterField);
+
+          // Update field values in JobFieldValue table
+          if (Object.keys(fieldValues).length > 0) {
+            await JobFieldValue.upsertMany(job.id, fieldValues, tx);
+          }
+        }
       }
-    });
 
-    if (data.job_register_id !== undefined) {
-      updateData.job_register_id = data.job_register_id ? parseInt(data.job_register_id) : null;
-    }
-    if (data.job_register_field_id !== undefined) {
-      updateData.job_register_field_id = data.job_register_field_id ? parseInt(data.job_register_field_id) : null;
-    }
-    if (data.client_info_id !== undefined) {
-      updateData.client_info_id = data.client_info_id ? parseInt(data.client_info_id) : null;
-    }
-    if (data.client_bu_id !== undefined) {
-      updateData.client_bu_id = data.client_bu_id ? parseInt(data.client_bu_id) : null;
-    }
-
-    // Merge mapped form fields with update data
-    // Explicit fields in updateData take precedence, mapped fields fill in missing values
-    const finalUpdateData = { ...mappedFormFields, ...updateData };
-    finalUpdateData.updated_at = new Date();
-
-    return await prisma.job.update({
-      where: { id: parseInt(id) },
-      data: finalUpdateData,
-      include: {
-        jobRegister: {
-          select: {
-            id: true,
-            job_title: true,
-            job_code: true,
+      // Fetch updated job with field values
+      return await tx.job.findUnique({
+        where: { id: parseInt(id) },
+        include: {
+          jobRegister: {
+            select: {
+              id: true,
+              job_title: true,
+              job_code: true,
+            },
           },
+          jobFieldValues: true,
         },
-      },
+      });
     });
   }
 

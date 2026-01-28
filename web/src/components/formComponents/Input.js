@@ -52,6 +52,15 @@ const Input = ({
   const inputType = type === 'password' && showPasswordToggle && showPassword ? 'text' : type;
   const isPasswordField = type === 'password' && showPasswordToggle;
 
+  // Add onWheel handler for number inputs to prevent scroll from changing values
+  // Only add if not already provided in props
+  const inputProps = {
+    ...props,
+    ...(type === 'number' && !props.onWheel && {
+      onWheel: (e) => e.target.blur()
+    })
+  };
+
   return (
     <div className={`mb-2 ${className}`}>
       {label && (
@@ -70,7 +79,7 @@ const Input = ({
           onChange={onChange}
           placeholder={placeholder}
           required={required}
-          {...props}
+          {...inputProps}
         />
         {isPasswordField && (
           <button

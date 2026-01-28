@@ -27,3 +27,18 @@ ADD INDEX `idx_client_info_id` (`client_info_id`);
 ALTER TABLE `job`
 ADD INDEX `idx_client_bu_id` (`client_bu_id`);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

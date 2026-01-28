@@ -255,7 +255,7 @@ export default function EditClientInfoPage() {
           <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={() => router.push('/dashboard/control-room/client')}
               disabled={submitting}
             >

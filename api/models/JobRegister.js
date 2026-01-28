@@ -26,6 +26,9 @@ class JobRegisterModel {
           select: {
             id: true,
             sac_no: true,
+            sgst: true,
+            cgst: true,
+            igst: true,
           },
         },
       },

@@ -143,7 +143,7 @@ export default function JobRegisterForm({
         <div className="flex justify-end space-x-3 mt-4">
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={onCancel}
           >
             Back
