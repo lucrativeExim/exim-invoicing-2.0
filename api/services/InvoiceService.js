@@ -224,10 +224,20 @@ class InvoiceService {
   }
 
   /**
-   * Calculate GST amounts
+   * Calculate GST amounts based on gst_type from job_service_charges
+   * @param {number} subtotal - The subtotal amount to calculate GST on
+   * @param {object} gstRate - The GST rate object with cgst, sgst, igst rates
+   * @param {string} gstType - The GST type: 'SC', 'I', or 'EXEMPTED'
+   * 
+   * Rules:
+   * - 'SC' (State + Central): Calculate CGST and SGST, set IGST to 0
+   * - 'I' (Interstate): Calculate IGST, set CGST and SGST to 0
+   * - 'EXEMPTED': Set all GST amounts to 0
    */
-  static calculateGst(subtotal, gstRate) {
+  static calculateGst(subtotal, gstRate, gstType = null) {
     console.log("gstRate", gstRate);
+    console.log("gstType", gstType);
+    
     if (!gstRate) {
       return {
         cgstRate: 0,
@@ -243,9 +253,34 @@ class InvoiceService {
     const sgstRate = parseFloat(gstRate.sgst || 0);
     const igstRate = parseFloat(gstRate.igst || 0);
 
-    const cgstAmount = (subtotal * cgstRate) / 100;
-    const sgstAmount = (subtotal * sgstRate) / 100;
-    const igstAmount = (subtotal * igstRate) / 100;
+    // Initialize amounts based on gst_type
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+
+    // Handle GST calculation based on gst_type
+    if (gstType === 'SC') {
+      // State + Central GST: Calculate CGST and SGST, set IGST to 0
+      cgstAmount = (subtotal * cgstRate) / 100;
+      sgstAmount = (subtotal * sgstRate) / 100;
+      igstAmount = 0;
+    } else if (gstType === 'I') {
+      // Interstate GST: Calculate IGST, set CGST and SGST to 0
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = (subtotal * igstRate) / 100;
+    } else if (gstType === 'EXEMPTED') {
+      // Exempted: All GST amounts are 0
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = 0;
+    } else {
+      // Default behavior (when gstType is null or unknown): Calculate all
+      // This maintains backward compatibility
+      cgstAmount = (subtotal * cgstRate) / 100;
+      sgstAmount = (subtotal * sgstRate) / 100;
+      igstAmount = (subtotal * igstRate) / 100;
+    }
 
     return {
       cgstRate,
@@ -311,6 +346,9 @@ class InvoiceService {
     // Get GST rate from first job's jobRegister
     const gstRate = jobs[0].jobRegister?.gstRate || null;
 
+    // Get gst_type from first job's service charge
+    const gstType = jobs[0].jobServiceCharges?.[0]?.gst_type || null;
+
     // Initialize totals
     let totalProfessionalCharges = 0;
     let totalRegistrationCharges = 0;
@@ -356,15 +394,34 @@ class InvoiceService {
       totalCaCertCount += this.getCaCertCount(jobFieldValues);
       totalCeCertCount += this.getCeCertCount(jobFieldValues);
 
-      // Get remi fields (only from first job)
-      if (remiFields.length === 0 && jobServiceCharge) {
+      // Get remi fields and sum charges across all jobs
+      if (jobServiceCharge) {
         const jobRemiFields = this.getRemiFields(jobServiceCharge);
-        remiFields.push(...jobRemiFields);
+        
+        // If this is the first job, initialize remiFields array with descriptions
+        if (remiFields.length === 0) {
+          jobRemiFields.forEach((remiField) => {
+            remiFields.push({
+              description: remiField.description,
+              charges: 0, // Will be summed below
+              fieldName: remiField.fieldName,
+            });
+          });
+        }
 
-        // Also populate remi charges map
+        // Sum charges for each remi field across all jobs
         jobRemiFields.forEach((remiField) => {
+          // Find matching remiField by fieldName and add charges
+          const existingRemiField = remiFields.find(
+            (rf) => rf.fieldName === remiField.fieldName
+          );
+          if (existingRemiField) {
+            existingRemiField.charges += remiField.charges;
+          }
+
+          // Also populate remi charges map (sum across all jobs)
           if (remiChargesMap[remiField.fieldName] !== undefined) {
-            remiChargesMap[remiField.fieldName] = remiField.charges;
+            remiChargesMap[remiField.fieldName] += remiField.charges;
           }
         });
       }
@@ -382,8 +439,8 @@ class InvoiceService {
       parseFloat(rewardAmount || 0) -
       parseFloat(discountAmount || 0);
 
-    // Calculate GST
-    const gst = this.calculateGst(serviceSubtotal, gstRate);
+    // Calculate GST (pass gst_type from job_service_charges)
+    const gst = this.calculateGst(serviceSubtotal, gstRate, gstType);
 
     // Calculate reimbursement subtotal (application fees + remi charges)
     const totalRemiCharges = Object.values(remiChargesMap).reduce(

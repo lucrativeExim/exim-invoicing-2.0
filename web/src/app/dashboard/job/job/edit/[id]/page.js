@@ -35,6 +35,11 @@ export default function EditJobPage() {
           jobData.jobFieldValues = [];
         }
         
+        // Ensure jobServiceCharges is always an array (from job_service_charges database table)
+        if (!jobData.jobServiceCharges || !Array.isArray(jobData.jobServiceCharges)) {
+          jobData.jobServiceCharges = [];
+        }
+        
         // Log field values for debugging - shows values fetched from job_field_values table
         if (jobData.jobFieldValues && jobData.jobFieldValues.length > 0) {
           console.log(`Loaded ${jobData.jobFieldValues.length} field values from job_field_values table for job ${jobId}:`, 
@@ -42,6 +47,27 @@ export default function EditJobPage() {
           );
         } else {
           console.log(`No field values found in job_field_values table for job ${jobId}`);
+        }
+        
+        // Log service charges and remi fields for debugging - shows values fetched from job_service_charges table
+        if (jobData.jobServiceCharges && jobData.jobServiceCharges.length > 0) {
+          const charge = jobData.jobServiceCharges[0];
+          console.log(`Loaded job service charges for job ${jobId}:`, {
+            group_id: charge.group_id,
+            client_name: charge.client_name,
+            remi_one_desc: charge.remi_one_desc,
+            remi_one_charges: charge.remi_one_charges,
+            remi_two_desc: charge.remi_two_desc,
+            remi_two_charges: charge.remi_two_charges,
+            remi_three_desc: charge.remi_three_desc,
+            remi_three_charges: charge.remi_three_charges,
+            remi_four_desc: charge.remi_four_desc,
+            remi_four_charges: charge.remi_four_charges,
+            remi_five_desc: charge.remi_five_desc,
+            remi_five_charges: charge.remi_five_charges,
+          });
+        } else {
+          console.log(`No service charges found in job_service_charges table for job ${jobId}`);
         }
         
         setJobData(jobData);

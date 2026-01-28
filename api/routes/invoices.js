@@ -3,6 +3,7 @@ const router = express.Router();
 const Invoice = require('../models/Invoice');
 const InvoiceService = require('../services/InvoiceService');
 const { authenticate, requireRole } = require('../middleware/accessControl');
+const { convertBigIntToString } = require('../lib/jsonUtils');
 
 // All routes require authentication
 router.use(authenticate);
@@ -30,7 +31,9 @@ router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       }
     }
     
-    res.json(invoices);
+    // Convert BigInt values to strings before serialization
+    const serializedInvoices = convertBigIntToString(invoices);
+    res.json(serializedInvoices);
   } catch (error) {
     console.error('Error fetching invoices:', error);
     res.status(500).json({ error: 'Failed to fetch invoices' });
@@ -70,7 +73,9 @@ router.get('/sample', requireRole(['Super_Admin', 'Admin']), async (req, res) =>
       discount_amount || 0
     );
 
-    res.json(breakdown);
+    // Convert BigInt values to strings before serialization
+    const serializedBreakdown = convertBigIntToString(breakdown);
+    res.json(serializedBreakdown);
   } catch (error) {
     console.error('Error calculating sample invoice:', error);
     res.status(500).json({
@@ -84,12 +89,17 @@ router.get('/sample', requireRole(['Super_Admin', 'Admin']), async (req, res) =>
 router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
+    // console.log(invoice);
     
     if (!invoice) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     
-    res.json(invoice);
+    // Convert BigInt values to strings before serialization
+    const serializedInvoice = convertBigIntToString(invoice);
+    res.json(serializedInvoice);
+    // console.log(serializedInvoice);
+    
   } catch (error) {
     console.error('Error fetching invoice:', error);
     res.status(500).json({ error: 'Failed to fetch invoice' });
@@ -157,8 +167,10 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       added_by: req.user.id, // Track who created this invoice
     });
 
+    // Convert BigInt values to strings before serialization
+    const serializedInvoice = convertBigIntToString(invoice);
     res.status(201).json({
-      ...invoice,
+      ...serializedInvoice,
       message: 'Invoice created successfully',
     });
   } catch (error) {
@@ -192,21 +204,98 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
 // Update invoice - Only Super Admin and Admin can update
 router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
-    // If shifting to Proforma, add proforma_created_by from req.user
-    const updateData = { ...req.body };
+    // If shifting to Proforma, recalculate invoice amounts based on selected jobs
     if (req.body.invoice_stage_status === 'Proforma') {
-      updateData.proforma_created_by = req.user.id;
+      // Fetch current invoice with selected jobs
+      const currentInvoice = await Invoice.findById(req.params.id);
+      
+      if (!currentInvoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      // Get job IDs from invoiceSelectedJobs
+      const jobIds = currentInvoice.invoiceSelectedJobs?.map(
+        (invoiceJob) => {
+          const jobId = invoiceJob.job?.id || invoiceJob.job_id;
+          return jobId ? parseInt(jobId) : null;
+        }
+      ).filter(Boolean) || [];
+
+      if (jobIds.length === 0) {
+        return res.status(400).json({ error: 'No jobs found for this invoice' });
+      }
+
+      // Get billing_type from current invoice
+      const billingType = currentInvoice.billing_type;
+      if (!billingType) {
+        return res.status(400).json({ error: 'Billing type is required' });
+      }
+
+      // Get reward_amount and discount_amount from current invoice or request body
+      const rewardAmount = req.body.reward_amount !== undefined 
+        ? req.body.reward_amount 
+        : (currentInvoice.reward_amount || 0);
+      const discountAmount = req.body.discount_amount !== undefined 
+        ? req.body.discount_amount 
+        : (currentInvoice.discount_amount || 0);
+
+      // Recalculate invoice breakdown using InvoiceService
+      const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+        jobIds,
+        billingType,
+        rewardAmount || 0,
+        discountAmount || 0
+      );
+
+      // Prepare update data with recalculated amounts
+      const updateData = {
+        ...req.body,
+        proforma_created_by: req.user.id,
+        // Update all calculated amounts
+        professional_charges: breakdown.professionalCharges,
+        registration_other_charges: breakdown.registrationCharges,
+        ca_charges: breakdown.caCharges,
+        ce_charges: breakdown.ceCharges,
+        ca_cert_count: breakdown.caCertCount,
+        ce_cert_count: breakdown.ceCertCount,
+        application_fees: breakdown.applicationFees,
+        remi_one_charges: breakdown.remiOneCharges,
+        remi_two_charges: breakdown.remiTwoCharges,
+        remi_three_charges: breakdown.remiThreeCharges,
+        remi_four_charges: breakdown.remiFourCharges,
+        remi_five_charges: breakdown.remiFiveCharges,
+        amount: breakdown.amount,
+        pay_amount: breakdown.payAmount,
+        reward_amount: breakdown.rewardAmount,
+        discount_amount: breakdown.discountAmount,
+      };
+
+      const invoice = await Invoice.update(req.params.id, updateData);
+
+      // Convert BigInt values to strings before serialization
+      const serializedInvoice = convertBigIntToString(invoice);
+      res.json({
+        ...serializedInvoice,
+        message: 'Invoice shifted to Proforma and amounts updated successfully',
+      });
+    } else {
+      // For other updates, use the original logic
+      const updateData = { ...req.body };
+      const invoice = await Invoice.update(req.params.id, updateData);
+
+      // Convert BigInt values to strings before serialization
+      const serializedInvoice = convertBigIntToString(invoice);
+      res.json({
+        ...serializedInvoice,
+        message: 'Invoice updated successfully',
+      });
     }
-
-    const invoice = await Invoice.update(req.params.id, updateData);
-
-    res.json({
-      ...invoice,
-      message: 'Invoice updated successfully',
-    });
   } catch (error) {
     console.error('Error updating invoice:', error);
-    res.status(500).json({ error: 'Failed to update invoice' });
+    res.status(500).json({ 
+      error: 'Failed to update invoice',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
   }
 });
 

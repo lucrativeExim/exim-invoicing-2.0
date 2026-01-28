@@ -58,6 +58,115 @@ const getFieldValueFromJobFieldValue = (jobId, fieldName, jobFieldValuesMap) => 
   return null;
 };
 
+// Helper function to calculate professional charges from job service charge
+const calculateProfessionalCharges = (jobServiceCharge, jobId, jobFieldValuesMap) => {
+  if (!jobServiceCharge) return 0;
+
+  const min = parseFloat(jobServiceCharge.min || 0);
+  const max = parseFloat(jobServiceCharge.max || 0);
+  const inPercentage = parseFloat(jobServiceCharge.in_percentage || 0);
+  const fixed = parseFloat(jobServiceCharge.fixed || 0);
+  const perShb = parseFloat(jobServiceCharge.per_shb || 0);
+
+  // Get per_shb value from JobFieldValue
+  const perShbValue = getFieldValueFromJobFieldValue(jobId, 'per_shb', jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, 'Per SHB', jobFieldValuesMap) || '0';
+  const perShbNum = parseFloat(perShbValue) || 0;
+
+  let professionalCharges = 0;
+
+  // Calculate based on in_percentage if available
+  if (inPercentage > 0 && perShbNum > 0) {
+    professionalCharges = (perShbNum * inPercentage) / 100;
+  } else if (fixed > 0) {
+    professionalCharges = fixed;
+  } else if (perShb > 0 && perShbNum > 0) {
+    professionalCharges = perShb * perShbNum;
+  }
+
+  // Apply min/max constraints
+  if (min > 0 && professionalCharges < min) {
+    professionalCharges = min;
+  }
+  if (max > 0 && professionalCharges > max) {
+    professionalCharges = max;
+  }
+
+  return professionalCharges;
+};
+
+// Helper function to calculate charges from job data for Full Invoice + Draft
+const calculateChargesFromJobs = (invoiceSelectedJobs, jobServiceChargesMap, jobFieldValuesMap) => {
+  if (!invoiceSelectedJobs || invoiceSelectedJobs.length === 0) {
+    return {
+      professionalCharges: 0,
+      registrationCharges: 0,
+      caCharges: 0,
+      ceCharges: 0,
+      applicationFees: 0,
+      caCertCount: 0,
+      ceCertCount: 0,
+    };
+  }
+
+  let totalProfessionalCharges = 0;
+  let totalRegistrationCharges = 0;
+  let totalCaCharges = 0;
+  let totalCeCharges = 0;
+  let totalApplicationFees = 0;
+  let totalCaCertCount = 0;
+  let totalCeCertCount = 0;
+
+  invoiceSelectedJobs.forEach((invoiceJob) => {
+    const job = invoiceJob.job;
+    const jobId = job?.id;
+    if (!jobId) return;
+
+    const jobServiceCharge = jobServiceChargesMap[jobId];
+
+    // Calculate professional charges
+    if (jobServiceCharge) {
+      totalProfessionalCharges += calculateProfessionalCharges(jobServiceCharge, jobId, jobFieldValuesMap);
+      totalRegistrationCharges += parseFloat(jobServiceCharge.registration_other_charges || 0);
+
+      // Calculate CA charges: no_of_cac * ca_charges
+      const noOfCacValue = getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+                           getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+                           getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap) || '0';
+      const noOfCac = parseFloat(noOfCacValue) || 0;
+      const caCharges = parseFloat(jobServiceCharge.ca_charges || 0);
+      totalCaCharges += noOfCac * caCharges;
+      totalCaCertCount += parseInt(noOfCacValue) || 0;
+
+      // Calculate CE charges: no_of_cec * ce_charges
+      const noOfCecValue = getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+                           getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+                           getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap) || '0';
+      const noOfCec = parseFloat(noOfCecValue) || 0;
+      const ceCharges = parseFloat(jobServiceCharge.ce_charges || 0);
+      totalCeCharges += noOfCec * ceCharges;
+      totalCeCertCount += parseInt(noOfCecValue) || 0;
+    }
+
+    // Calculate application fees
+    const applFeeValue = getFieldValueFromJobFieldValue(jobId, "appl_fee_duty_paid", jobFieldValuesMap) ||
+                         getFieldValueFromJobFieldValue(jobId, "Appl Fees Paid", jobFieldValuesMap) ||
+                         getFieldValueFromJobFieldValue(jobId, "appl_fees_paid", jobFieldValuesMap) ||
+                         getFieldValueFromJobFieldValue(jobId, "application_fees", jobFieldValuesMap) || '0';
+    totalApplicationFees += parseFloat(applFeeValue) || 0;
+  });
+
+  return {
+    professionalCharges: totalProfessionalCharges,
+    registrationCharges: totalRegistrationCharges,
+    caCharges: totalCaCharges,
+    ceCharges: totalCeCharges,
+    applicationFees: totalApplicationFees,
+    caCertCount: totalCaCertCount,
+    ceCertCount: totalCeCertCount,
+  };
+};
+
 // Helper function to convert number to words (Indian currency format)
 const numberToWords = (num) => {
   if (num === 0) return "Zero";
@@ -182,20 +291,102 @@ export default function InvoiceViewPage() {
         const invoiceData = response.data;
         setInvoice(invoiceData);
 
-        // Build jobFieldValuesMap from invoice data
-        const fieldValuesMap = {};
-        if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
-          invoiceData.invoiceSelectedJobs.forEach((invoiceJob) => {
-            const job = invoiceJob.job;
-            if (job && job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
-              fieldValuesMap[job.id] = {};
-              job.jobFieldValues.forEach((fv) => {
-                fieldValuesMap[job.id][fv.field_name] = fv.field_value;
-              });
-            }
-          });
+        // Check invoice type and stage status
+        const invoiceType = invoiceData.invoice_type;
+        const invoiceStageStatus = invoiceData.invoice_stage_status;
+        const isFullInvoiceDraft = 
+          (invoiceType === "full_invoice" || invoiceType === "Full_Invoice") && 
+          invoiceStageStatus === "Draft";
+        const isPartialInvoiceDraft = 
+          (invoiceType === "partial_invoice" || invoiceType === "Partial_Invoice") && 
+          invoiceStageStatus === "Draft";
+
+        // For Full_Invoice + Draft: Fetch data from job, job_field_values, job_service_charges
+        // For Partial_Invoice + Draft: Use invoice table data directly
+        if (isFullInvoiceDraft) {
+          // Build jobFieldValuesMap from invoice data
+          const fieldValuesMap = {};
+          if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
+            invoiceData.invoiceSelectedJobs.forEach((invoiceJob) => {
+              const job = invoiceJob.job;
+              if (job && job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
+                fieldValuesMap[job.id] = {};
+                job.jobFieldValues.forEach((fv) => {
+                  fieldValuesMap[job.id][fv.field_name] = fv.field_value;
+                });
+              }
+            });
+          }
+          setJobFieldValuesMap(fieldValuesMap);
+
+          // Fetch job service charges for each selected job
+          if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
+            const chargesMap = {};
+            await Promise.all(
+              invoiceData.invoiceSelectedJobs.map(async (invoiceJob) => {
+                const jobId = invoiceJob.job?.id;
+                if (jobId) {
+                  try {
+                    const chargesResponse = await api.get(`/jobs/${jobId}/service-charges`);
+                    const charges = chargesResponse.data || [];
+                    const activeCharge = charges.find((charge) => charge.status === "Active") || charges[0] || null;
+                    if (activeCharge) {
+                      chargesMap[jobId] = activeCharge;
+                    }
+                  } catch (error) {
+                    console.error(`Error fetching service charges for job ${jobId}:`, error);
+                  }
+                }
+              })
+            );
+            setJobServiceChargesMap(chargesMap);
+          }
+        } else if (isPartialInvoiceDraft) {
+          // For Partial_Invoice + Draft: Use invoice table data directly
+          // No need to fetch job service charges or build jobFieldValuesMap
+          // The invoice table already contains all the necessary data
+          setJobFieldValuesMap({});
+          setJobServiceChargesMap({});
+        } else {
+          // For other cases (Proforma, etc.), use existing logic
+          // Build jobFieldValuesMap from invoice data
+          const fieldValuesMap = {};
+          if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
+            invoiceData.invoiceSelectedJobs.forEach((invoiceJob) => {
+              const job = invoiceJob.job;
+              if (job && job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
+                fieldValuesMap[job.id] = {};
+                job.jobFieldValues.forEach((fv) => {
+                  fieldValuesMap[job.id][fv.field_name] = fv.field_value;
+                });
+              }
+            });
+          }
+          setJobFieldValuesMap(fieldValuesMap);
+
+          // Fetch job service charges for each selected job
+          if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
+            const chargesMap = {};
+            await Promise.all(
+              invoiceData.invoiceSelectedJobs.map(async (invoiceJob) => {
+                const jobId = invoiceJob.job?.id;
+                if (jobId) {
+                  try {
+                    const chargesResponse = await api.get(`/jobs/${jobId}/service-charges`);
+                    const charges = chargesResponse.data || [];
+                    const activeCharge = charges.find((charge) => charge.status === "Active") || charges[0] || null;
+                    if (activeCharge) {
+                      chargesMap[jobId] = activeCharge;
+                    }
+                  } catch (error) {
+                    console.error(`Error fetching service charges for job ${jobId}:`, error);
+                  }
+                }
+              })
+            );
+            setJobServiceChargesMap(chargesMap);
+          }
         }
-        setJobFieldValuesMap(fieldValuesMap);
 
         // Fetch account if we have account_id from invoice or from first job
         let accountId = null;
@@ -257,29 +448,6 @@ export default function InvoiceViewPage() {
             }
           }
         }
-
-        // Fetch job service charges for each selected job
-        if (invoiceData.invoiceSelectedJobs && invoiceData.invoiceSelectedJobs.length > 0) {
-          const chargesMap = {};
-          await Promise.all(
-            invoiceData.invoiceSelectedJobs.map(async (invoiceJob) => {
-              const jobId = invoiceJob.job?.id;
-              if (jobId) {
-                try {
-                  const chargesResponse = await api.get(`/jobs/${jobId}/service-charges`);
-                  const charges = chargesResponse.data || [];
-                  const activeCharge = charges.find((charge) => charge.status === "Active") || charges[0] || null;
-                  if (activeCharge) {
-                    chargesMap[jobId] = activeCharge;
-                  }
-                } catch (error) {
-                  console.error(`Error fetching service charges for job ${jobId}:`, error);
-                }
-              }
-            })
-          );
-          setJobServiceChargesMap(chargesMap);
-        }
       } catch (error) {
         console.error("Error fetching invoice:", error);
         alert("Failed to load invoice. Please try again.");
@@ -300,39 +468,149 @@ export default function InvoiceViewPage() {
     return null;
   }, [invoice]);
 
-  // Get remi fields from job service charges
+  // Check if this is Full_Invoice + Draft (calculate from job/client data, not invoice table)
+  const isFullInvoiceDraft = useMemo(() => {
+    if (!invoice) return false;
+    const invoiceType = invoice.invoice_type;
+    const invoiceStageStatus = invoice.invoice_stage_status;
+    return (
+      (invoiceType === "full_invoice" || invoiceType === "Full_Invoice") && 
+      invoiceStageStatus === "Draft"
+    );
+  }, [invoice]);
+
+  // Check if this is Partial_Invoice + Draft (use invoice table data directly)
+  const isPartialInvoiceDraft = useMemo(() => {
+    if (!invoice) return false;
+    const invoiceType = invoice.invoice_type;
+    const invoiceStageStatus = invoice.invoice_stage_status;
+    return (
+      (invoiceType === "partial_invoice" || invoiceType === "Partial_Invoice") && 
+      invoiceStageStatus === "Draft"
+    );
+  }, [invoice]);
+
+  // Get remi fields from job service charges (for Full_Invoice + Draft) or from invoice table (for Partial_Invoice + Draft and Proforma)
   const remiFields = useMemo(() => {
-    if (!invoice || !invoice.invoiceSelectedJobs || invoice.invoiceSelectedJobs.length === 0) return [];
+    if (!invoice) return [];
     
-    const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
-    if (!firstJobId) return [];
+    const invoiceStageStatus = invoice.invoice_stage_status;
+    const isDraft = invoiceStageStatus === "Draft";
     
-    const jobServiceCharge = jobServiceChargesMap[firstJobId];
-    if (!jobServiceCharge) return [];
-    
-    const remiFieldsArray = [];
-    const remiFieldsConfig = [
-      { desc: 'remi_one_desc', charges: 'remi_one_charges' },
-      { desc: 'remi_two_desc', charges: 'remi_two_charges' },
-      { desc: 'remi_three_desc', charges: 'remi_three_charges' },
-      { desc: 'remi_four_desc', charges: 'remi_four_charges' },
-      { desc: 'remi_five_desc', charges: 'remi_five_charges' },
-    ];
-    
-    remiFieldsConfig.forEach((field) => {
-      const description = jobServiceCharge[field.desc];
-      const charges = jobServiceCharge[field.charges];
+    // For Partial_Invoice + Draft, use invoice table data directly
+    if (isPartialInvoiceDraft) {
+      const remiFieldsArray = [];
+      const remiFieldsConfig = [
+        { charges: 'remi_one_charges' },
+        { charges: 'remi_two_charges' },
+        { charges: 'remi_three_charges' },
+        { charges: 'remi_four_charges' },
+        { charges: 'remi_five_charges' },
+      ];
       
-      if (description && description.trim() !== '') {
-        remiFieldsArray.push({
-          description: description,
-          charges: parseFloat(charges || 0),
-        });
-      }
-    });
+      remiFieldsConfig.forEach((field) => {
+        const charges = parseFloat(invoice[field.charges] || 0);
+        if (charges > 0) {
+          // For Partial_Invoice, we use generic description or can be stored in invoice table
+          // For now, using generic descriptions
+          const descriptions = [
+            'Reimbursement One',
+            'Reimbursement Two',
+            'Reimbursement Three',
+            'Reimbursement Four',
+            'Reimbursement Five',
+          ];
+          const index = remiFieldsConfig.indexOf(field);
+          remiFieldsArray.push({
+            description: descriptions[index] || `Reimbursement ${index + 1}`,
+            charges: charges,
+          });
+        }
+      });
+      
+      return remiFieldsArray;
+    }
     
-    return remiFieldsArray;
-  }, [invoice, jobServiceChargesMap]);
+    // For Proforma (non-Draft) invoices, get amounts from invoice table and descriptions from job service charges
+    if (!isDraft && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
+      if (!firstJobId) return [];
+      
+      const jobServiceCharge = jobServiceChargesMap[firstJobId];
+      const remiFieldsArray = [];
+      const remiFieldsConfig = [
+        { desc: 'remi_one_desc', charges: 'remi_one_charges' },
+        { desc: 'remi_two_desc', charges: 'remi_two_charges' },
+        { desc: 'remi_three_desc', charges: 'remi_three_charges' },
+        { desc: 'remi_four_desc', charges: 'remi_four_charges' },
+        { desc: 'remi_five_desc', charges: 'remi_five_charges' },
+      ];
+      
+      remiFieldsConfig.forEach((field) => {
+        // Get amount from invoice table
+        const charges = parseFloat(invoice[field.charges] || 0);
+        if (charges > 0) {
+          // Try to get description from job service charges, otherwise use generic description
+          let description = null;
+          if (jobServiceCharge && jobServiceCharge[field.desc] && jobServiceCharge[field.desc].trim() !== '') {
+            description = jobServiceCharge[field.desc];
+          } else {
+            // Use generic descriptions as fallback
+            const descriptions = [
+              'Reimbursement One',
+              'Reimbursement Two',
+              'Reimbursement Three',
+              'Reimbursement Four',
+              'Reimbursement Five',
+            ];
+            const index = remiFieldsConfig.indexOf(field);
+            description = descriptions[index] || `Reimbursement ${index + 1}`;
+          }
+          
+          remiFieldsArray.push({
+            description: description,
+            charges: charges,
+          });
+        }
+      });
+      
+      return remiFieldsArray;
+    }
+    
+    // For Full_Invoice + Draft, get from job service charges
+    if (isFullInvoiceDraft && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
+      if (!firstJobId) return [];
+      
+      const jobServiceCharge = jobServiceChargesMap[firstJobId];
+      if (!jobServiceCharge) return [];
+      
+      const remiFieldsArray = [];
+      const remiFieldsConfig = [
+        { desc: 'remi_one_desc', charges: 'remi_one_charges' },
+        { desc: 'remi_two_desc', charges: 'remi_two_charges' },
+        { desc: 'remi_three_desc', charges: 'remi_three_charges' },
+        { desc: 'remi_four_desc', charges: 'remi_four_charges' },
+        { desc: 'remi_five_desc', charges: 'remi_five_charges' },
+      ];
+      
+      remiFieldsConfig.forEach((field) => {
+        const description = jobServiceCharge[field.desc];
+        const charges = jobServiceCharge[field.charges];
+        
+        if (description && description.trim() !== '') {
+          remiFieldsArray.push({
+            description: description,
+            charges: parseFloat(charges || 0),
+          });
+        }
+      });
+      
+      return remiFieldsArray;
+    }
+    
+    return [];
+  }, [invoice, jobServiceChargesMap, isPartialInvoiceDraft, isFullInvoiceDraft]);
 
   // Get GST rates from job register
   const gstRates = useMemo(() => {
@@ -346,54 +624,140 @@ export default function InvoiceViewPage() {
     };
   }, [invoice]);
 
-  // Get GST type from first job's service charge
+  // Get GST type from first job's service charge (for Full_Invoice) or from invoice (for Partial_Invoice)
   const gstType = useMemo(() => {
-    if (!invoice || !invoice.invoiceSelectedJobs || invoice.invoiceSelectedJobs.length === 0) return null;
-    const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
-    if (!firstJobId) return null;
-    return jobServiceChargesMap[firstJobId]?.gst_type || null;
+    if (!invoice) return null;
+    
+    // For Partial_Invoice + Draft, we might need to get GST type from invoice or job service charges
+    // For now, try to get from job service charges if available, otherwise return null
+    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
+      if (firstJobId && jobServiceChargesMap[firstJobId]) {
+        return jobServiceChargesMap[firstJobId]?.gst_type || null;
+      }
+    }
+    return null;
   }, [invoice, jobServiceChargesMap]);
 
-  // Calculate CA CERT count from JobFieldValue table
+  // Calculate CA CERT count from JobFieldValue table (for Full_Invoice) or from invoice table (for Partial_Invoice)
   const caCertCount = useMemo(() => {
-    if (!invoice || !invoice.invoiceSelectedJobs || invoice.invoiceSelectedJobs.length === 0) return 0;
-    // Sum up CA CERT count from JobFieldValue table for all selected jobs
-    // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
-    return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
-      const jobId = invoiceJob.job?.id;
-      if (!jobId) return total;
-      const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
-                        getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
-                        getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
-      return total + (parseInt(fieldValue) || 0);
-    }, 0);
-  }, [invoice, jobFieldValuesMap]);
+    if (!invoice) return 0;
+    
+    // For Full_Invoice + Draft, calculate from JobFieldValue table (not invoice table)
+    if (isFullInvoiceDraft) {
+      if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+        // Sum up CA CERT count from JobFieldValue table for all selected jobs
+        // Try multiple field name variations: "no_of_cac", "No of CAC", "noofcac", etc.
+        return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
+          const jobId = invoiceJob.job?.id;
+          if (!jobId) return total;
+          const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+                            getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+                            getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
+          return total + (parseInt(fieldValue) || 0);
+        }, 0);
+      }
+      return 0;
+    }
+    
+    // For Partial_Invoice + Draft, use invoice table data directly
+    if (isPartialInvoiceDraft) {
+      return parseInt(invoice.ca_cert_count || 0);
+    }
+    
+    // For Proforma, calculate from JobFieldValue table
+    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
+        const jobId = invoiceJob.job?.id;
+        if (!jobId) return total;
+        const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+                          getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+                          getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
+        return total + (parseInt(fieldValue) || 0);
+      }, 0);
+    }
+    return 0;
+  }, [invoice, jobFieldValuesMap, isFullInvoiceDraft, isPartialInvoiceDraft]);
 
-  // Calculate CE CERT count from JobFieldValue table
+  // Calculate CE CERT count from JobFieldValue table (for Full_Invoice) or from invoice table (for Partial_Invoice)
   const ceCertCount = useMemo(() => {
-    if (!invoice || !invoice.invoiceSelectedJobs || invoice.invoiceSelectedJobs.length === 0) return 0;
-    // Sum up CE CERT count from JobFieldValue table for all selected jobs
-    // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
-    return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
-      const jobId = invoiceJob.job?.id;
-      if (!jobId) return total;
-      const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
-                        getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
-                        getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
-      return total + (parseInt(fieldValue) || 0);
-    }, 0);
-  }, [invoice, jobFieldValuesMap]);
+    if (!invoice) return 0;
+    
+    // For Full_Invoice + Draft, calculate from JobFieldValue table (not invoice table)
+    if (isFullInvoiceDraft) {
+      if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+        // Sum up CE CERT count from JobFieldValue table for all selected jobs
+        // Try multiple field name variations: "no_of_cec", "No of CEC", "noofcec", etc.
+        return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
+          const jobId = invoiceJob.job?.id;
+          if (!jobId) return total;
+          const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+                            getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+                            getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
+          return total + (parseInt(fieldValue) || 0);
+        }, 0);
+      }
+      return 0;
+    }
+    
+    // For Partial_Invoice + Draft, use invoice table data directly
+    if (isPartialInvoiceDraft) {
+      return parseInt(invoice.ce_cert_count || 0);
+    }
+    
+    // For Proforma, calculate from JobFieldValue table
+    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      return invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
+        const jobId = invoiceJob.job?.id;
+        if (!jobId) return total;
+        const fieldValue = getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+                          getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+                          getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
+        return total + (parseInt(fieldValue) || 0);
+      }, 0);
+    }
+    return 0;
+  }, [invoice, jobFieldValuesMap, isFullInvoiceDraft, isPartialInvoiceDraft]);
 
   // Calculate invoice totals
   const invoiceCalculations = useMemo(() => {
     if (!invoice) return null;
 
-    const baseAmount = parseFloat(invoice.professional_charges || 0);
-    const registrationCharges = parseFloat(invoice.registration_other_charges || 0);
-    const caCharges = parseFloat(invoice.ca_charges || 0);
-    const ceCharges = parseFloat(invoice.ce_charges || 0);
-    const rewardAmount = parseFloat(invoice.reward_amount || 0);
-    const discountAmount = parseFloat(invoice.discount_amount || 0);
+    // For Full Invoice + Draft: Calculate from job/client data
+    // For Partial Invoice + Draft or Proforma: Use invoice table data
+    let baseAmount, registrationCharges, caCharges, ceCharges, applicationFees, caCertCount, ceCertCount;
+    let rewardAmount, discountAmount;
+
+    if (isFullInvoiceDraft) {
+      // Calculate charges from job data
+      const calculatedCharges = calculateChargesFromJobs(
+        invoice.invoiceSelectedJobs,
+        jobServiceChargesMap,
+        jobFieldValuesMap
+      );
+      baseAmount = calculatedCharges.professionalCharges;
+      registrationCharges = calculatedCharges.registrationCharges;
+      caCharges = calculatedCharges.caCharges;
+      ceCharges = calculatedCharges.ceCharges;
+      applicationFees = calculatedCharges.applicationFees;
+      caCertCount = calculatedCharges.caCertCount;
+      ceCertCount = calculatedCharges.ceCertCount;
+      
+      // Reward and discount amounts might still be stored in invoice table
+      // If not stored, they would be 0
+      rewardAmount = parseFloat(invoice.reward_amount || 0);
+      discountAmount = parseFloat(invoice.discount_amount || 0);
+    } else {
+      // Use invoice table data for Partial Invoice + Draft or Proforma
+      baseAmount = parseFloat(invoice.professional_charges || 0);
+      registrationCharges = parseFloat(invoice.registration_other_charges || 0);
+      caCharges = parseFloat(invoice.ca_charges || 0);
+      ceCharges = parseFloat(invoice.ce_charges || 0);
+      rewardAmount = parseFloat(invoice.reward_amount || 0);
+      discountAmount = parseFloat(invoice.discount_amount || 0);
+      // applicationFees will be calculated below for non-Full Invoice cases
+      applicationFees = 0;
+    }
     
     const subtotal = baseAmount + registrationCharges + caCharges + ceCharges + rewardAmount - discountAmount;
     
@@ -438,22 +802,29 @@ export default function InvoiceViewPage() {
       igstAmount = (cgstRate > 0 || sgstRate > 0) ? 0 : (subtotal * igstRate) / 100;
     }
 
-    // Calculate application fees from JobFieldValue table
-    // Try multiple field name variations: "appl_fee_duty_paid", "Appl Fees Paid", "appl_fees_paid", etc.
-    let applicationFees = 0;
-    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
-      applicationFees = invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
-        const jobId = invoiceJob.job?.id;
-        if (!jobId) return total;
-        const fieldValue = getFieldValueFromJobFieldValue(jobId, "appl_fee_duty_paid", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "Appl Fees Paid", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "appl_fees_paid", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "application_fees", jobFieldValuesMap);
-        if (fieldValue) {
-          return total + parseFloat(fieldValue || 0);
+    // Application fees: Already calculated above for Full Invoice + Draft
+    // For Partial Invoice + Draft or Proforma, calculate from invoice table
+    if (!isFullInvoiceDraft) {
+      if (isPartialInvoiceDraft) {
+        // For Partial_Invoice + Draft, use invoice table data directly
+        applicationFees = parseFloat(invoice.application_fees || 0);
+      } else {
+        // For Proforma, calculate from JobFieldValue table
+        if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+          applicationFees = invoice.invoiceSelectedJobs.reduce((total, invoiceJob) => {
+            const jobId = invoiceJob.job?.id;
+            if (!jobId) return total;
+            const fieldValue = getFieldValueFromJobFieldValue(jobId, "appl_fee_duty_paid", jobFieldValuesMap) ||
+                              getFieldValueFromJobFieldValue(jobId, "Appl Fees Paid", jobFieldValuesMap) ||
+                              getFieldValueFromJobFieldValue(jobId, "appl_fees_paid", jobFieldValuesMap) ||
+                              getFieldValueFromJobFieldValue(jobId, "application_fees", jobFieldValuesMap);
+            if (fieldValue) {
+              return total + parseFloat(fieldValue || 0);
+            }
+            return total;
+          }, 0);
         }
-        return total;
-      }, 0);
+      }
     }
     const remiCharges = remiFields.reduce((total, remiField) => total + remiField.charges, 0);
 
@@ -461,6 +832,11 @@ export default function InvoiceViewPage() {
 
     return {
       baseAmount,
+      registrationCharges,
+      caCharges,
+      ceCharges,
+      rewardAmount,
+      discountAmount,
       subtotal,
       cgstRate: baseCgstRate,
       sgstRate: baseSgstRate,
@@ -473,7 +849,7 @@ export default function InvoiceViewPage() {
       total,
       totalInWords: numberToWords(total),
     };
-  }, [invoice, gstRates, gstType, remiFields, jobFieldValuesMap]);
+  }, [invoice, gstRates, gstType, remiFields, jobFieldValuesMap, jobServiceChargesMap, isFullInvoiceDraft, isPartialInvoiceDraft]);
 
   // Format date (use proforma_created_at for Proforma Invoice, created_at for Draft Invoice)
   const invoiceDate = useMemo(() => {
@@ -675,11 +1051,14 @@ export default function InvoiceViewPage() {
     return "NA";
   }, [invoice, jobServiceChargesMap]);
 
-  // Get client details from first job's service charge
+  // Get client details from first job's service charge (for Full_Invoice) or from job clientInfo (for Partial_Invoice)
   const clientDetails = useMemo(() => {
     if (invoice && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
-      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
+      const firstJob = invoice.invoiceSelectedJobs[0].job;
+      const firstJobId = firstJob?.id;
+      
       if (firstJobId) {
+        // Try to get from job service charges first (for Full_Invoice)
         const jobServiceCharge = jobServiceChargesMap[firstJobId];
         if (jobServiceCharge) {
           return {
@@ -689,6 +1068,19 @@ export default function InvoiceViewPage() {
             concernPerson: jobServiceCharge.concern_person || "NA",
             concernEmail: jobServiceCharge.concern_email_id || "NA",
             invoiceDescription: jobServiceCharge.invoice_description || null,
+          };
+        }
+        
+        // For Partial_Invoice, try to get from job's clientInfo as fallback
+        if (isPartialInvoiceDraft && firstJob?.clientInfo) {
+          const clientInfo = firstJob.clientInfo;
+          return {
+            name: clientInfo.client_name || "NA",
+            address: clientInfo.address || null,
+            gstNo: clientInfo.gst_no || "NA",
+            concernPerson: clientInfo.concern_person || "NA",
+            concernEmail: clientInfo.concern_email_id || "NA",
+            invoiceDescription: null, // Not available in clientInfo
           };
         }
       }
@@ -701,7 +1093,7 @@ export default function InvoiceViewPage() {
       concernEmail: "NA",
       invoiceDescription: null,
     };
-  }, [invoice, jobServiceChargesMap]);
+  }, [invoice, jobServiceChargesMap, isPartialInvoiceDraft]);
 
   if (loading) {
     return (
@@ -910,8 +1302,11 @@ export default function InvoiceViewPage() {
                     (
                       parseFloat(invoiceCalculations.applicationFees || 0) +
                       parseFloat(invoiceCalculations.remiCharges || 0) -
-                      parseFloat(invoice.discount_amount || 0)
+                      parseFloat(invoiceCalculations.discountAmount || 0)
                     ).toFixed(2)
+                  ) : invoiceCalculations ? (
+                    // For Full Invoice + Draft, use calculated baseAmount; otherwise use invoice table amount
+                    parseFloat(invoiceCalculations.baseAmount || 0).toFixed(2)
                   ) : (
                     parseFloat(invoice.amount || 0).toFixed(2)
                   )}
@@ -1025,68 +1420,61 @@ export default function InvoiceViewPage() {
             {/* Right: Charges and Taxes */}
             <div className="p-1">
               <div className="text-xs grid grid-cols-12">
-                {invoice.billing_type !== "Reimbursement" && (
+                {invoice.billing_type !== "Reimbursement" && invoiceCalculations && (
                   <>
-                    {parseFloat(invoice.reward_amount || 0) > 0 && (
+                    {parseFloat(invoiceCalculations.rewardAmount || 0) > 0 && (
                       <>
                         <div className="col-span-9">Reward </div>
                         <div className="col-span-1">₹</div>
                         <div className="col-span-2 text-right">
-                          {parseFloat(invoice.reward_amount || 0).toFixed(2)}
+                          {parseFloat(invoiceCalculations.rewardAmount || 0).toFixed(2)}
                         </div>
                       </>
                     )}
-                    {parseFloat(invoice.discount_amount || 0) > 0 && (
+                    {parseFloat(invoiceCalculations.discountAmount || 0) > 0 && (
                       <>
                         <div className="col-span-9">Discount </div>
                         <div className="col-span-1">₹</div>
                         <div className="col-span-2 text-right">
-                          {parseFloat(invoice.discount_amount || 0).toFixed(2)}
+                          {parseFloat(invoiceCalculations.discountAmount || 0).toFixed(2)}
                         </div>
                       </>
                     )}
-                    {parseFloat(invoice.registration_other_charges || 0) > 0 && (
+                    {parseFloat(invoiceCalculations.registrationCharges || 0) > 0 && (
                       <>
                     <div className="col-span-9">Registration/Other Charges </div>
                     <div className="col-span-1">₹</div>
                     <div className="col-span-2 text-right">
-                      {parseFloat(invoice.registration_other_charges || 0).toFixed(2)}
+                      {parseFloat(invoiceCalculations.registrationCharges || 0).toFixed(2)}
                     </div>
                     </>
                     )}
-                    {parseFloat(invoice.ca_charges || 0) > 0 && (
+                    {parseFloat(invoiceCalculations.caCharges || 0) > 0 && (
                       <>
                     <div className="col-span-9">
                       Arrangement of CA CERT. ({caCertCount} Nos)
                     </div>
                     <div className="col-span-1">₹</div>
                     <div className="col-span-2 text-right">
-                      {parseFloat(invoice.ca_charges || 0).toFixed(2)}
+                      {parseFloat(invoiceCalculations.caCharges || 0).toFixed(2)}
                     </div>
                     </>
                     )}
-                    {parseFloat(invoice.ce_charges || 0) > 0 && (
+                    {parseFloat(invoiceCalculations.ceCharges || 0) > 0 && (
                       <>
                     <div className="col-span-9">
                       Arrangement of CE CERT. ({ceCertCount} Nos)
                     </div>
                     <div className="col-span-1">₹</div>
                     <div className="col-span-2 text-right">
-                      {parseFloat(invoice.ce_charges || 0).toFixed(2)}
+                      {parseFloat(invoiceCalculations.ceCharges || 0).toFixed(2)}
                     </div>
                     </>
                     )}
                     <div className="col-span-9 font-semibold">Subtotal </div>
                     <div className="col-span-1 font-semibold">₹</div>
                     <div className="col-span-2 text-right font-semibold">
-                      {(
-                        parseFloat(invoice.professional_charges || 0) +
-                        parseFloat(invoice.registration_other_charges || 0) +
-                        parseFloat(invoice.ca_charges || 0) +
-                        parseFloat(invoice.ce_charges || 0) +
-                        parseFloat(invoice.reward_amount || 0) -
-                        parseFloat(invoice.discount_amount || 0)
-                      ).toFixed(2)}
+                      {invoiceCalculations.subtotal.toFixed(2)}
                     </div>
                     {invoiceCalculations && (
                       <>
@@ -1154,8 +1542,8 @@ export default function InvoiceViewPage() {
                           ).toFixed(2);
                         } else if (invoice.billing_type === "Service") {
                           // For Service: Only Service section fields (Subtotal + GST)
-                          // Calculate subtotal from displayed Service fields
-                          const serviceSubtotal = (
+                          // Use calculated values from invoiceCalculations for Full Invoice + Draft
+                          const serviceSubtotal = invoiceCalculations ? invoiceCalculations.subtotal : (
                             parseFloat(invoice.professional_charges || 0) +
                             parseFloat(invoice.registration_other_charges || 0) +
                             parseFloat(invoice.ca_charges || 0) +
@@ -1192,18 +1580,11 @@ export default function InvoiceViewPage() {
                     totalAmount =
                       parseFloat(invoiceCalculations.applicationFees || 0) +
                       parseFloat(invoiceCalculations.remiCharges || 0) -
-                      parseFloat(invoice.discount_amount || 0);
+                      parseFloat(invoiceCalculations.discountAmount || 0);
                   } else if (invoice.billing_type === "Service") {
                     // For Service: Only Service section fields (Subtotal + GST)
-                    // Calculate subtotal from displayed Service fields
-                    const serviceSubtotal = (
-                      parseFloat(invoice.professional_charges || 0) +
-                      parseFloat(invoice.registration_other_charges || 0) +
-                      parseFloat(invoice.ca_charges || 0) +
-                      parseFloat(invoice.ce_charges || 0) +
-                      parseFloat(invoice.reward_amount || 0) -
-                      parseFloat(invoice.discount_amount || 0)
-                    );
+                    // Use calculated values from invoiceCalculations for Full Invoice + Draft
+                    const serviceSubtotal = invoiceCalculations.subtotal;
                     // Add GST amounts
                     const gstTotal = (invoiceCalculations?.cgstAmount || 0) + (invoiceCalculations?.sgstAmount || 0) + (invoiceCalculations?.igstAmount || 0);
                     totalAmount = serviceSubtotal + gstTotal;

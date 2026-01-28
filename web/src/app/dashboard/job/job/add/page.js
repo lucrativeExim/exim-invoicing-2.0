@@ -111,6 +111,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   const hasLoadedBasicFieldsRef = useRef(false); // Track if we've loaded basic job fields (jobNo, status, billingType, etc.) in edit mode
   const lastLoadedJobIdRef = useRef(null); // Track which job ID we've loaded to prevent reloading same job
   const expectedBillingTypeRef = useRef(null); // Track the expected billingType value from job data in edit mode
+  const hasLoadedRemiFromJobRef = useRef(false); // Track if we've loaded remi data from job_service_charges in edit mode
   // Store client and BU IDs from edit mode to populate dropdowns
   const [editClientId, setEditClientId] = useState(null);
   const [editBuId, setEditBuId] = useState(null);
@@ -293,6 +294,10 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
         
         lastLoadedJobIdRef.current = jobId; // Track which job we've loaded
         hasLoadedBasicFieldsRef.current = true; // Mark that we've loaded basic fields
+        hasLoadedRemiFromJobRef.current = false; // Reset remi loaded flag for new job
+      } else {
+        // If loading the same job again, still load remi data from job_service_charges
+        hasLoadedRemiFromJobRef.current = false; // Reset to allow reloading
       }
       
       // Load client_info_id and client_bu_id directly from job (always load these)
@@ -345,6 +350,8 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           fixed_percentage_per_shb: charge.fixed_percentage_per_shb || 'No',
         });
         
+        // Load remi data from job_service_charges - preserve both descriptions and charges
+        // This ensures we show the actual remi data saved for this job
         setRemiData({
           remi_one_desc: charge.remi_one_desc || '',
           remi_one_charges: charge.remi_one_charges || '',
@@ -357,6 +364,7 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
           remi_five_desc: charge.remi_five_desc || '',
           remi_five_charges: charge.remi_five_charges || '',
         });
+        hasLoadedRemiFromJobRef.current = true; // Mark that we've loaded remi data from job_service_charges
         
         // Fallback: If client_info_id or client_bu_id not on job, try to get from service charges
         if (!job.client_info_id || !job.client_bu_id) {
@@ -963,18 +971,28 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
   }, [selectedBuId]);
 
   // Fetch Remi descriptions from job_register table when job register is selected
+  // In edit mode, preserve remi descriptions from job_service_charges if they exist
   useEffect(() => {
     if (selectedJobRegister) {
-      setRemiData(prev => ({
-        ...prev,
-        remi_one_desc: selectedJobRegister.remi_one_desc || '',
-        remi_two_desc: selectedJobRegister.remi_two_desc || '',
-        remi_three_desc: selectedJobRegister.remi_three_desc || '',
-        remi_four_desc: selectedJobRegister.remi_four_desc || '',
-        remi_five_desc: selectedJobRegister.remi_five_desc || '',
-      }));
+      setRemiData(prev => {
+        // In edit mode, if remi data was already loaded from job_service_charges, preserve it completely
+        if (isEditMode && hasLoadedRemiFromJobRef.current) {
+          // Don't overwrite remi data from job_service_charges - return previous state as-is
+          return prev;
+        }
+        // In add mode, or if remi data wasn't loaded from job_service_charges, use descriptions from job register
+        // Only update descriptions, preserve charges if they exist
+        return {
+          ...prev,
+          remi_one_desc: selectedJobRegister.remi_one_desc || prev.remi_one_desc || '',
+          remi_two_desc: selectedJobRegister.remi_two_desc || prev.remi_two_desc || '',
+          remi_three_desc: selectedJobRegister.remi_three_desc || prev.remi_three_desc || '',
+          remi_four_desc: selectedJobRegister.remi_four_desc || prev.remi_four_desc || '',
+          remi_five_desc: selectedJobRegister.remi_five_desc || prev.remi_five_desc || '',
+        };
+      });
     }
-  }, [selectedJobRegister]);
+  }, [selectedJobRegister, isEditMode]);
 
   // Fetch and set next Job No based on selected job register
   const fetchNextJobNo = useCallback(async (jobRegister) => {
@@ -1107,6 +1125,11 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     });
     setJobNo('');
     setClaimNo('');
+    // Reset refs
+    hasLoadedFromJobRef.current = false;
+    hasLoadedBasicFieldsRef.current = false;
+    hasLoadedRemiFromJobRef.current = false;
+    lastLoadedJobIdRef.current = null;
   };
 
   // Reset form for new job - preserves job register selection
@@ -1190,6 +1213,9 @@ export default function AddJobPage({ mode = 'add', jobId = null, initialJobData 
     if (selectedJobRegister) {
       await fetchNextJobNo(selectedJobRegister);
     }
+    
+    // Reset refs (but keep hasLoadedFromJobRef false since this is add mode)
+    hasLoadedRemiFromJobRef.current = false;
   };
 
   // Helper function to map form field data to Job model columns

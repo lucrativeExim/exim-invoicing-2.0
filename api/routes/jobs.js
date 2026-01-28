@@ -5,6 +5,7 @@ const JobServiceCharge = require('../models/JobServiceCharge');
 const JobRegisterField = require('../models/JobRegisterField');
 const prisma = require('../lib/prisma');
 const { authenticate, requireRole } = require('../middleware/accessControl');
+const { convertBigIntToString } = require('../lib/jsonUtils');
 
 // All routes require authentication
 router.use(authenticate);
@@ -16,7 +17,9 @@ router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
     // Support both invoiceType (new) and invoiceReady (legacy) for backward compatibility
     const invoiceTypeParam = invoiceType || (invoiceReady === 'true' ? 'full_invoice' : invoiceReady === 'false' ? null : undefined);
     const jobs = await Job.findAll({ jobRegisterId, status, invoiceType: invoiceTypeParam, jobIdStatus });
-    res.json(jobs);
+    // Convert BigInt values to strings before serialization
+    const serializedJobs = convertBigIntToString(jobs);
+    res.json(serializedJobs);
   } catch (error) {
     console.error('Error fetching jobs:', error);
     res.status(500).json({ error: 'Failed to fetch jobs' });
@@ -198,7 +201,9 @@ router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
     
-    res.json(job);
+    // Convert BigInt values to strings before serialization
+    const serializedJob = convertBigIntToString(job);
+    res.json(serializedJob);
   } catch (error) {
     console.error('Error fetching job:', error);
     res.status(500).json({ error: 'Failed to fetch job' });
@@ -522,8 +527,10 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
       return completeJob;
     });
 
+    // Convert BigInt values to strings before serialization
+    const serializedResult = convertBigIntToString(result);
     res.status(201).json({
-      ...result,
+      ...serializedResult,
       message: 'Job created successfully with service charges',
     });
   } catch (error) {
@@ -612,8 +619,10 @@ router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
     // Fetch updated job with service charges
     const completeJob = await Job.findById(id);
     
+    // Convert BigInt values to strings before serialization
+    const serializedJob = convertBigIntToString(completeJob);
     res.json({
-      ...completeJob,
+      ...serializedJob,
       message: 'Job updated successfully',
     });
   } catch (error) {
