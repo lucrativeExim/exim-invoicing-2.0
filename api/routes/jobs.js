@@ -13,10 +13,22 @@ router.use(authenticate);
 // Get all jobs - Only Super Admin and Admin can access
 router.get('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
-    const { jobRegisterId, status, invoiceType, invoiceReady, jobIdStatus } = req.query;
+    const { jobRegisterId, status, invoiceType, invoiceReady, jobIdStatus, excludeInvoices, accountId, billingType } = req.query;
     // Support both invoiceType (new) and invoiceReady (legacy) for backward compatibility
     const invoiceTypeParam = invoiceType || (invoiceReady === 'true' ? 'full_invoice' : invoiceReady === 'false' ? null : undefined);
-    const jobs = await Job.findAll({ jobRegisterId, status, invoiceType: invoiceTypeParam, jobIdStatus });
+    
+    // Decode billingType if it's URL encoded (e.g., "Service_Reimbursement" -> "Service_Reimbursement")
+    const decodedBillingType = billingType ? decodeURIComponent(billingType) : null;
+    
+    const jobs = await Job.findAll({ 
+      jobRegisterId, 
+      status, 
+      invoiceType: invoiceTypeParam, 
+      jobIdStatus,
+      excludeInvoices: excludeInvoices === 'true' || excludeInvoices === true,
+      accountId: accountId || null,
+      billingType: decodedBillingType || null,
+    });
     // Convert BigInt values to strings before serialization
     const serializedJobs = convertBigIntToString(jobs);
     res.json(serializedJobs);

@@ -97,7 +97,7 @@ export default function EditFieldMasterPage() {
     // Check field name uniqueness on change
     if (name === 'field_name' && value) {
       const existingField = fields.find(
-        (f) => f.field_name === value && f.id !== fieldId
+        (f) => f.field_name === value && Number(f.id) !== Number(fieldId)
       );
       if (existingField) {
         setErrors((prev) => ({
@@ -118,7 +118,7 @@ export default function EditFieldMasterPage() {
     // Check field name uniqueness
     if (formData.field_name) {
       const existingField = fields.find(
-        (f) => f.field_name === formData.field_name && f.id !== fieldId
+        (f) => f.field_name === formData.field_name && Number(f.id) !== Number(fieldId)
       );
       if (existingField) {
         newErrors.field_name = 'Field name already exists';

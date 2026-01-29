@@ -74,7 +74,7 @@ export default function InvoiceCreationPage() {
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState("");
   const [selectedAccount, setSelectedAccount] = useState("");
-  const [billingType, setBillingType] = useState("Service & Reimbursement");
+  const [billingType, setBillingType] = useState("Service_Reimbursement");
   const [invoiceType, setInvoiceType] = useState("Full Invoice");
   const [loading, setLoading] = useState(false);
   const [clientsLoading, setClientsLoading] = useState(false);
@@ -119,7 +119,6 @@ export default function InvoiceCreationPage() {
   const rewardDiscountAmountInputRef = useRef(null);
   const isTypingRewardDiscountRef = useRef(false);
   const isPrintingRef = useRef(false);
-  const [excludedJobIds, setExcludedJobIds] = useState([]); // Jobs with active, non-canceled invoices
   const [invoiceBreakdown, setInvoiceBreakdown] = useState(null); // API response from /invoices/sample
   const [invoiceBreakdownLoading, setInvoiceBreakdownLoading] = useState(false);
 
@@ -421,30 +420,32 @@ export default function InvoiceCreationPage() {
 
         try {
           setJobsLoading(true);
-          // Fetch all jobs for the selected job register and account with invoice_type
           const accountId = sessionAccount.id;
-          const response = await api.get(
-            `/jobs?jobRegisterId=${selectedJobCode}&jobIdStatus=Active`
-          );
-          const allJobs = response.data || [];
-
-          // Filter jobs by account_id only (all clients for this account)
-          const filteredJobs = allJobs.filter((job) => {
-            const matchesAccount =
-              job.clientInfo &&
-              job.clientInfo.account_id &&
-              job.clientInfo.account_id.toString() === accountId.toString();
-
-            return matchesAccount;
+          // Build query params
+          const params = new URLSearchParams({
+            jobRegisterId: selectedJobCode,
+            jobIdStatus: 'Active',
+            excludeInvoices: 'true',
           });
+          
+          if (accountId) {
+            params.append('accountId', accountId);
+          }
+          
+          if (billingType) {
+            params.append('billingType', billingType);
+          }
 
-          setJobs(filteredJobs);
-          setSelectedJobIds([]); // Clear selections when "All Clients" is selected
+          const response = await api.get(`/jobs?${params.toString()}`);
+          const fetchedJobs = response.data || [];
+
+          setJobs(fetchedJobs);
+          setSelectedJobIds([]); // Clear selections when fetching new jobs
           setJobServiceChargesMap({});
 
           // Build jobFieldValuesMap from jobs data
           const fieldValuesMap = {};
-          filteredJobs.forEach((job) => {
+          fetchedJobs.forEach((job) => {
             if (job.jobFieldValues && Array.isArray(job.jobFieldValues)) {
               fieldValuesMap[job.id] = {};
               job.jobFieldValues.forEach((fv) => {
@@ -475,14 +476,28 @@ export default function InvoiceCreationPage() {
 
       try {
         setJobsLoading(true);
-        // Fetch all jobs for the selected job register with invoice_type
-        const response = await api.get(
-          `/jobs?jobRegisterId=${selectedJobCode}&jobIdStatus=Active`
-        );
-        const allJobs = response.data || [];
+        // Build query params
+        const params = new URLSearchParams({
+          jobRegisterId: selectedJobCode,
+          jobIdStatus: 'Active',
+          excludeInvoices: 'true',
+        });
+        
+        // Add account_id from selected service charge
+        if (selectedClientServiceCharge.account_id) {
+          params.append('accountId', selectedClientServiceCharge.account_id);
+        }
+        
+        // Add billing_type if selected
+        if (billingType) {
+          params.append('billingType', billingType);
+        }
 
-        // Filter jobs by client_info_id, client_bu_id, and account_id from selected service charge
-        const filteredJobs = allJobs.filter((job) => {
+        const response = await api.get(`/jobs?${params.toString()}`);
+        const fetchedJobs = response.data || [];
+
+        // Filter jobs by client_info_id and client_bu_id from selected service charge
+        const filteredJobs = fetchedJobs.filter((job) => {
           const matchesClient =
             job.clientInfo &&
             job.clientInfo.id.toString() ===
@@ -491,14 +506,8 @@ export default function InvoiceCreationPage() {
             job.clientBu &&
             job.clientBu.id.toString() ===
               selectedClientServiceCharge.client_bu_id?.toString();
-          const matchesAccount =
-            selectedClientServiceCharge.account_id &&
-            job.clientInfo &&
-            job.clientInfo.account_id &&
-            job.clientInfo.account_id.toString() ===
-              selectedClientServiceCharge.account_id.toString();
 
-          return matchesClient && matchesBU && matchesAccount;
+          return matchesClient && matchesBU;
         });
 
         setJobs(filteredJobs);
@@ -533,6 +542,7 @@ export default function InvoiceCreationPage() {
     selectedClient,
     selectedClientServiceCharge,
     sessionAccount,
+    billingType,
   ]);
 
   // Fetch active invoices for selected jobs and calculate Opening Amt
@@ -642,62 +652,6 @@ export default function InvoiceCreationPage() {
     fetchActiveInvoicesAndCalculateOpeningAmt();
   }, [selectedJobIds]);
 
-  // Fetch invoices to exclude jobs that have active, non-canceled invoices with matching billing_type
-  useEffect(() => {
-    const fetchExcludedJobs = async () => {
-      if (!selectedJobCode || !billingType || jobs.length === 0) {
-        setExcludedJobIds([]);
-        return;
-      }
-
-      try {
-        // Map billingType to database values
-        const billingTypeMap = {
-          "Service": "Service",
-          "Service & Reimbursement": "Service_Reimbursement",
-          "Reimbursement": "Reimbursement",
-        };
-        const dbBillingType = billingTypeMap[billingType];
-
-        // Fetch invoices with invoice_status = 'Active'
-        const response = await api.get('/invoices', {
-          params: {
-            invoice_status: 'Active',
-          },
-        });
-
-        const activeInvoices = response.data || [];
-
-        // Filter invoices that:
-        // 1. Are not canceled (invoice_stage_status != 'Canceled')
-        // 2. Match the selected billing_type
-        const nonCanceledInvoices = activeInvoices.filter(
-          (invoice) =>
-            invoice.invoice_stage_status !== 'Canceled' &&
-            invoice.billing_type === dbBillingType
-        );
-
-        // Collect all job IDs from these invoices
-        const excludedIds = new Set();
-        nonCanceledInvoices.forEach((invoice) => {
-          if (invoice.invoiceSelectedJobs && Array.isArray(invoice.invoiceSelectedJobs)) {
-            invoice.invoiceSelectedJobs.forEach((selectedJob) => {
-              if (selectedJob.job_id) {
-                excludedIds.add(selectedJob.job_id);
-              }
-            });
-          }
-        });
-
-        setExcludedJobIds(Array.from(excludedIds));
-      } catch (error) {
-        console.error('Error fetching invoices for exclusion:', error);
-        setExcludedJobIds([]);
-      }
-    };
-
-    fetchExcludedJobs();
-  }, [selectedJobCode, billingType, jobs]);
 
   // Function to fetch invoice breakdown from API
   const fetchInvoiceBreakdown = async () => {
@@ -711,7 +665,7 @@ export default function InvoiceCreationPage() {
       setInvoiceBreakdownLoading(true);
 
       // Call the /invoices/sample API
-      // Note: InvoiceService expects billing_type as "Service", "Reimbursement", or "Service & Reimbursement"
+      // Note: InvoiceService expects billing_type as "Service", "Reimbursement", or "Service_Reimbursement"
       const response = await api.get('/invoices/sample', {
         params: {
           job_ids: selectedJobIds.join(','),
@@ -738,9 +692,9 @@ export default function InvoiceCreationPage() {
     const newInvoiceType = e.target.value;
     setInvoiceType(newInvoiceType);
 
-    // If Partial Invoice is selected, set Billing Type to "Service & Reimbursement" and disable it
+    // If Partial Invoice is selected, set Billing Type to "Service_Reimbursement" and disable it
     if (newInvoiceType === "Partial Invoice") {
-      setBillingType("Service & Reimbursement");
+      setBillingType("Service_Reimbursement");
     }
 
     // Reset search and selected jobs when invoice type changes
@@ -749,55 +703,18 @@ export default function InvoiceCreationPage() {
     setJobServiceChargesMap({});
   };
 
-  // Helper function to filter jobs by billing_type based on selected billingType
-  const filterJobsByBillingType = (jobList) => {
-    if (!billingType) return jobList;
-
-    return jobList.filter((job) => {
-      const jobBillingType = job.billing_type;
-
-      switch (billingType) {
-        case "Service":
-          // Show jobs where billing_type = 'Service' OR 'Service_Reimbursement_Split'
-          return (
-            jobBillingType === "Service" ||
-            jobBillingType === "Service_Reimbursement_Split"
-          );
-        case "Service & Reimbursement":
-          // Show jobs where billing_type = 'Service_Reimbursement'
-          return jobBillingType === "Service_Reimbursement";
-        case "Reimbursement":
-          // Show jobs where billing_type = 'Reimbursement' OR 'Service_Reimbursement_Split'
-          return (
-            jobBillingType === "Reimbursement" ||
-            jobBillingType === "Service_Reimbursement_Split"
-          );
-        default:
-          return true;
-      }
-    });
-  };
-
   // Filter jobs for Full Invoice (Invoice Type = "full_invoice" and Status = "Closed")
-  // Exclude jobs that have active, non-canceled invoices with matching billing_type
-  const fullInvoiceJobs = filterJobsByBillingType(
-    jobs.filter(
-      (job) =>
-        job.invoice_type === "full_invoice" &&
-        job.status === "Closed" &&
-        !excludedJobIds.includes(job.id)
-    )
+  const fullInvoiceJobs = jobs.filter(
+    (job) =>
+      job.invoice_type === "full_invoice" &&
+      job.status === "Closed"
   );
 
   // Filter jobs for Partial Invoice (Invoice Type = "full_invoice" and Status = "In_process" or "Closed")
-  // Exclude jobs that have active, non-canceled invoices with matching billing_type
-  const partialInvoiceJobs = filterJobsByBillingType(
-    jobs.filter(
-      (job) =>
-        job.invoice_type === "full_invoice" &&
-        (job.status === "In_process" || job.status === "Closed") &&
-        !excludedJobIds.includes(job.id)
-    )
+  const partialInvoiceJobs = jobs.filter(
+    (job) =>
+      job.invoice_type === "full_invoice" &&
+      (job.status === "In_process" || job.status === "Closed")
   );
 
   // Filter jobs by search term
@@ -1161,7 +1078,7 @@ export default function InvoiceCreationPage() {
 
   // Billing type options
   const billingTypeOptions = [
-    { value: "Service & Reimbursement", label: "Service & Reimbursement" },
+    { value: "Service_Reimbursement", label: "Service & Reimbursement" },
     { value: "Service", label: "Service" },
     { value: "Reimbursement", label: "Reimbursement" },
   ];
@@ -2067,7 +1984,7 @@ export default function InvoiceCreationPage() {
         const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
         finalTotalAmount = serviceSubtotal + gstTotal;
       } else {
-        // For Service & Reimbursement: Subtotal + GST + Application Fees + Remi Charges
+        // For Service_Reimbursement: Subtotal + GST + Application Fees + Remi Charges
         finalTotalAmount = calculations?.total || 0;
       }
 
@@ -2075,7 +1992,7 @@ export default function InvoiceCreationPage() {
       // IMPORTANT: Only store fields that are displayed in the invoice UI
       // For "Service": Don't store application_fees or remi charges (not displayed)
       // For "Reimbursement": Don't store service charges (not displayed)
-      // For "Service & Reimbursement": Store all fields (all displayed)
+      // For "Service_Reimbursement": Store all fields (all displayed)
       
       const invoiceData = {
         account_id: effectiveAccountId ? parseInt(effectiveAccountId) : null, // Account ID for draft_view_id generation
@@ -2083,7 +2000,7 @@ export default function InvoiceCreationPage() {
         billing_type: billingType,
         invoice_type: invoiceType,
         pay_amount: finalTotalAmount.toFixed(2), // Use calculated total amount
-        // Service charges - only store if displayed (Service or Service & Reimbursement)
+        // Service charges - only store if displayed (Service or Service_Reimbursement)
         amount: billingType === "Reimbursement" 
           ? null 
           : (invoiceCalculation.amount || professionalCharges.toFixed(2)),
@@ -2093,10 +2010,10 @@ export default function InvoiceCreationPage() {
         ce_charges: billingType === "Reimbursement" ? 0 : ceCharges,
         ca_cert_count: billingType === "Reimbursement" ? 0 : (combinedCaCertCount || 0),
         ce_cert_count: billingType === "Reimbursement" ? 0 : (combinedCeCertCount || 0),
-        // Reimbursement charges - only store if displayed (Reimbursement or Service & Reimbursement)
+        // Reimbursement charges - only store if displayed (Reimbursement or Service_Reimbursement)
         application_fees: billingType === "Service" ? 0 : applicationFees,
         // Map remi charges based on their field name, using Pay Amt if available
-        // Only store if displayed (Reimbursement or Service & Reimbursement)
+        // Only store if displayed (Reimbursement or Service_Reimbursement)
         remi_one_charges: billingType === "Service" 
           ? 0 
           : (remiChargesMap["remi_one_charges"]
@@ -2122,7 +2039,7 @@ export default function InvoiceCreationPage() {
           : (remiChargesMap["remi_five_charges"]
               ? String(remiChargesMap["remi_five_charges"])
               : null),
-        // Reward/Discount - only store if displayed (Service or Service & Reimbursement)
+        // Reward/Discount - only store if displayed (Service or Service_Reimbursement)
         reward_amount: billingType === "Reimbursement"
           ? 0
           : (parseFloat(invoiceCalculation.reward_amount || 0) || 0),
@@ -4025,7 +3942,7 @@ export default function InvoiceCreationPage() {
                               const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
                               return (serviceSubtotal + gstTotal).toFixed(2);
                             } else {
-                              // For Service & Reimbursement: Calculate total from displayed values
+                              // For Service_Reimbursement: Calculate total from displayed values
                               // Calculate displayed subtotal (same as shown on screen)
                               const displayedSubtotal = calculateServiceSubtotal();
                               
@@ -4081,7 +3998,7 @@ export default function InvoiceCreationPage() {
                         const gstTotal = (calculations?.cgstAmount || 0) + (calculations?.sgstAmount || 0) + (calculations?.igstAmount || 0);
                         totalAmount = serviceSubtotal + gstTotal;
                       } else {
-                        // For Service & Reimbursement: Calculate total from displayed values
+                        // For Service_Reimbursement: Calculate total from displayed values
                         // Calculate displayed subtotal (same as shown on screen)
                         const displayedSubtotal = calculateServiceSubtotal();
                         
@@ -4142,8 +4059,8 @@ export default function InvoiceCreationPage() {
             })()}
           </div>
 
-          {/* Annexure Table - Show when sample invoice is displayed */}
-          {showSampleInvoice && selectedJobIds.length > 0 && (
+          {/* Annexure Table - Show when sample invoice is displayed and more than 1 job is selected */}
+          {showSampleInvoice && selectedJobIds.length > 1 && (
             <div className="max-w-4xl mx-auto p-4 print:p-0 print:max-w-full print:page-break-before-always">
               <div
                 className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-4"
@@ -4164,574 +4081,627 @@ export default function InvoiceCreationPage() {
                   </div>
                 </div>
 
-                {/* Annexure Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse border border-black text-xs">
-                    <thead>
-                      <tr className="bg-white text-black">
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          <div>Sr.No.</div>
-                          <div className="border-t border-black my-1" style={{ width: 'calc(100% + 1rem)', marginLeft: '-0.5rem', marginRight: '-0.5rem' }}></div>
-                          <div>Job No.</div>
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          Application No & Date
-                        </th>
-                        {/* Dynamic columns from billingFieldNames (max 4) */}
-                        {billingFieldNames.slice(0, 4).map((fieldName, index) => (
-                          <th key={index} className="border border-black px-2 py-2 text-left font-bold">
-                            {fieldName}
-                          </th>
-                        ))}
-                        {/* Fill remaining dynamic columns if less than 4 */}
-                        {Array.from({ length: Math.max(0, 4 - billingFieldNames.length) }).map((_, index) => (
-                          <th key={`empty-${index}`} className="border border-black px-2 py-2 text-left font-bold">
-                            Dynamic
-                          </th>
-                        ))}
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          Qty & DOQ
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          Charges
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          Regi / Other
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          CA Charges
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          CE Charges
-                        </th>
-                        <th className="border border-black px-2 py-2 text-left font-bold">
-                          Appl Fee
-                        </th>
-                        {/* Dynamic remi_desc columns */}
-                        {(() => {
-                          // Get all unique remi_desc values from all selected jobs in order (remi_one_desc to remi_five_desc)
-                          const getAllUniqueRemiDescs = () => {
-                            const remiDescOrdered = [];
-                            const seenDescriptions = new Set();
-                            
-                            const remiFieldsConfig = [
-                              { desc: "remi_one_desc", descCamel: "remiOneDesc" },
-                              { desc: "remi_two_desc", descCamel: "remiTwoDesc" },
-                              { desc: "remi_three_desc", descCamel: "remiThreeDesc" },
-                              { desc: "remi_four_desc", descCamel: "remiFourDesc" },
-                              { desc: "remi_five_desc", descCamel: "remiFiveDesc" },
-                            ];
+                {/* Format date helper */}
+                {(() => {
+                  const formatDateToDDMMYYYY = (dateStr) => {
+                    if (!dateStr || dateStr === "NA" || dateStr === null || dateStr === undefined) return "NA";
+                    try {
+                      // Check if date is in YYYY-MM-DD format
+                      const dateMatch = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                      if (dateMatch) {
+                        const [, year, month, day] = dateMatch;
+                        return `${day}-${month}-${year}`;
+                      }
+                      // If already in different format, try to parse as Date
+                      const date = new Date(dateStr);
+                      if (!isNaN(date.getTime())) {
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        return `${day}-${month}-${year}`;
+                      }
+                      return String(dateStr); // Return as-is if can't parse
+                    } catch (e) {
+                      return String(dateStr); // Return as-is if error
+                    }
+                  };
 
-                            // Iterate through fields in order and add descriptions as we encounter them
-                            remiFieldsConfig.forEach((field) => {
-                              selectedJobIds.forEach((jobId) => {
-                                const jobServiceCharge = jobServiceChargesMap[jobId];
-                                if (!jobServiceCharge) return;
-                                
-                                const description = jobServiceCharge[field.desc] || jobServiceCharge[field.descCamel];
-                                if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-                                  const trimmedDesc = String(description).trim();
-                                  if (!seenDescriptions.has(trimmedDesc)) {
-                                    seenDescriptions.add(trimmedDesc);
-                                    remiDescOrdered.push(trimmedDesc);
-                                  }
-                                }
-                              });
-                            });
+                  // Get remi fields for a job
+                  const getRemiFieldsForJob = (jobId) => {
+                    const jobServiceCharge = jobServiceChargesMap[jobId];
+                    if (!jobServiceCharge) return [];
 
-                            return remiDescOrdered;
-                          };
+                    const remiFieldsArray = [];
+                    const remiFieldsConfig = [
+                      { desc: "remi_one_desc", descCamel: "remiOneDesc", charges: "remi_one_charges", chargesCamel: "remiOneCharges", key: "R1" },
+                      { desc: "remi_two_desc", descCamel: "remiTwoDesc", charges: "remi_two_charges", chargesCamel: "remiTwoCharges", key: "R2" },
+                      { desc: "remi_three_desc", descCamel: "remiThreeDesc", charges: "remi_three_charges", chargesCamel: "remiThreeCharges", key: "R3" },
+                      { desc: "remi_four_desc", descCamel: "remiFourDesc", charges: "remi_four_charges", chargesCamel: "remiFourCharges", key: "R4" },
+                      { desc: "remi_five_desc", descCamel: "remiFiveDesc", charges: "remi_five_charges", chargesCamel: "remiFiveCharges", key: "R5" },
+                    ];
 
-                          const uniqueRemiDescs = getAllUniqueRemiDescs();
-                          return uniqueRemiDescs.map((remiDesc, index) => (
-                            <th key={`remi-${index}`} className="border border-black px-2 py-2 text-left font-bold">
-                              {remiDesc}
-                            </th>
-                          ));
-                        })()}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        // Calculate all unique remi_desc values once for all jobs in order (remi_one_desc to remi_five_desc)
-                        const getAllUniqueRemiDescs = () => {
-                          const remiDescOrdered = [];
-                          const seenDescriptions = new Set();
-                          
-                          const remiFieldsConfig = [
-                            { desc: "remi_one_desc", descCamel: "remiOneDesc" },
-                            { desc: "remi_two_desc", descCamel: "remiTwoDesc" },
-                            { desc: "remi_three_desc", descCamel: "remiThreeDesc" },
-                            { desc: "remi_four_desc", descCamel: "remiFourDesc" },
-                            { desc: "remi_five_desc", descCamel: "remiFiveDesc" },
-                          ];
+                    remiFieldsConfig.forEach((field) => {
+                      const description = jobServiceCharge[field.desc] || jobServiceCharge[field.descCamel];
+                      const charges = jobServiceCharge[field.charges] || jobServiceCharge[field.chargesCamel];
 
-                          // Iterate through fields in order and add descriptions as we encounter them
-                          remiFieldsConfig.forEach((field) => {
-                            selectedJobIds.forEach((jid) => {
-                              const jsc = jobServiceChargesMap[jid];
-                              if (!jsc) return;
-                              
-                              const description = jsc[field.desc] || jsc[field.descCamel];
-                              if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-                                const trimmedDesc = String(description).trim();
-                                if (!seenDescriptions.has(trimmedDesc)) {
-                                  seenDescriptions.add(trimmedDesc);
-                                  remiDescOrdered.push(trimmedDesc);
-                                }
-                              }
-                            });
-                          });
-
-                          return remiDescOrdered;
-                        };
-                        const uniqueRemiDescs = getAllUniqueRemiDescs();
-                        const totalColumns = 11 + uniqueRemiDescs.length;
-
-                        return selectedJobIds.length === 0 ? (
-                          <tr>
-                            <td colSpan={totalColumns} className="border border-black px-2 py-2 text-center">
-                              No jobs selected
-                            </td>
-                          </tr>
-                        ) : (
-                          selectedJobIds.map((jobId, index) => {
-                            const job = jobs.find((j) => j.id === jobId);
-                            const jobServiceCharge = jobServiceChargesMap[jobId];
-                          
-                          if (!job) {
-                            // Return a row with job ID even if job details not found
-                            return (
-                              <tr key={jobId}>
-                                <td colSpan={11 + uniqueRemiDescs.length} className="border border-black px-2 py-2 text-center">
-                                  Job {jobId} not found
-                                </td>
-                              </tr>
-                            );
+                      if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
+                        let parsedCharges = 0;
+                        const chargesStr = charges !== null && charges !== undefined ? String(charges).trim() : "";
+                        const isChargesEmpty = chargesStr === "" || chargesStr.toUpperCase() === "NULL" || chargesStr === "null";
+                        
+                        if (!isChargesEmpty) {
+                          let numValue = parseFloat(chargesStr);
+                          if (isNaN(numValue) || !isFinite(numValue)) {
+                            const cleanedStr = chargesStr.replace(/[^\d.-]/g, '');
+                            numValue = parseFloat(cleanedStr);
                           }
-
-                        // Get application number and date
-                        const applicationNo = getFieldValueFromJobFieldValue(
-                          jobId,
-                          "application_ref_no",
-                          jobFieldValuesMap
-                        ) || getFieldValueFromJobFieldValue(
-                          jobId,
-                          "Application Ref No",
-                          jobFieldValuesMap
-                        ) || "NA";
-                        
-                        const applicationDateRaw = getFieldValueFromJobFieldValue(
-                          jobId,
-                          "application_ref_date",
-                          jobFieldValuesMap
-                        ) || getFieldValueFromJobFieldValue(
-                          jobId,
-                          "Application Ref Date",
-                          jobFieldValuesMap
-                        ) || getFieldValueFromJobFieldValue(
-                          jobId,
-                          "application_date",
-                          jobFieldValuesMap
-                        ) || "NA";
-                        
-                        // Format date from YYYY-MM-DD to DD-MM-YYYY
-                        const formatDateToDDMMYYYY = (dateStr) => {
-                          if (!dateStr || dateStr === "NA") return "NA";
-                          try {
-                            // Check if date is in YYYY-MM-DD format
-                            const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-                            if (dateMatch) {
-                              const [, year, month, day] = dateMatch;
-                              return `${day}-${month}-${year}`;
-                            }
-                            // If already in different format, try to parse as Date
-                            const date = new Date(dateStr);
-                            if (!isNaN(date.getTime())) {
-                              const day = String(date.getDate()).padStart(2, '0');
-                              const month = String(date.getMonth() + 1).padStart(2, '0');
-                              const year = date.getFullYear();
-                              return `${day}-${month}-${year}`;
-                            }
-                            return dateStr; // Return as-is if can't parse
-                          } catch (e) {
-                            return dateStr; // Return as-is if error
-                          }
-                        };
-                        
-                        const applicationDate = formatDateToDDMMYYYY(applicationDateRaw);
-
-                        // Get quantity and DOQ
-                        const quantity = getFieldValueFromJobFieldValue(
-                          jobId,
-                          "quantity",
-                          jobFieldValuesMap
-                        ) || getFieldValueFromJobFieldValue(
-                          jobId,
-                          "Quantity",
-                          jobFieldValuesMap
-                        ) || "NA";
-                        
-                        const doq = getFieldValueFromJobFieldValue(
-                          jobId,
-                          "description_of_quantity",
-                          jobFieldValuesMap
-                        ) || getFieldValueFromJobFieldValue(
-                          jobId,
-                          "Description of Quantity",
-                          jobFieldValuesMap
-                        ) || "NA";
-
-                        // Calculate charges for this job
-                        const jobCharges = jobServiceCharge
-                          ? calculateInvoiceAmount(job, jobServiceCharge)
-                          : { amount: 0 };
-
-                        // Get registration/other charges
-                        const regiOther = jobServiceCharge
-                          ? parseFloat(jobServiceCharge.registration_other_charges || 0)
-                          : 0;
-
-                        // Get CA cert count for this job
-                        const caCertCount = 
-                          getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
-                        const caCertCountValue = parseInt(caCertCount) || 0;
-
-                        // Get CE cert count for this job
-                        const ceCertCount = 
-                          getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
-                          getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
-                        const ceCertCountValue = parseInt(ceCertCount) || 0;
-
-                        // Get CA charges and multiply by cert count
-                        const caChargesBase = jobServiceCharge
-                          ? parseFloat(jobServiceCharge.ca_charges || 0)
-                          : 0;
-                        const caCharges = caChargesBase * caCertCountValue;
-
-                        // Get CE charges and multiply by cert count
-                        const ceChargesBase = jobServiceCharge
-                          ? parseFloat(jobServiceCharge.ce_charges || 0)
-                          : 0;
-                        const ceCharges = ceChargesBase * ceCertCountValue;
-
-                        // Get application fees - check multiple sources (same logic as combinedApplicationFees)
-                        let applFeeValue = 0;
-                        const applFeeFieldValue =
-                          getFieldValueFromJobFieldValue(
-                            jobId,
-                            "appl_fee_duty_paid",
-                            jobFieldValuesMap
-                          ) ||
-                          getFieldValueFromJobFieldValue(
-                            jobId,
-                            "Appl Fees Paid",
-                            jobFieldValuesMap
-                          ) ||
-                          getFieldValueFromJobFieldValue(
-                            jobId,
-                            "appl_fees_paid",
-                            jobFieldValuesMap
-                          ) ||
-                          getFieldValueFromJobFieldValue(
-                            jobId,
-                            "application_fees",
-                            jobFieldValuesMap
-                          );
-                        
-                        if (applFeeFieldValue) {
-                          applFeeValue = parseFloat(applFeeFieldValue || 0);
-                        } else if (jobServiceCharge) {
-                          // Try to get from job service charge if available
-                          applFeeValue = parseFloat(jobServiceCharge.application_fees || 0);
+                          parsedCharges = (isNaN(numValue) || !isFinite(numValue)) ? 0 : numValue;
                         }
 
-                        // Get remi fields for this job
-                        const getRemiFieldsForJob = (jobId) => {
-                          const jobServiceCharge = jobServiceChargesMap[jobId];
-                          if (!jobServiceCharge) return [];
+                        remiFieldsArray.push({
+                          key: field.key,
+                          description: String(description).trim(),
+                          charges: parsedCharges,
+                        });
+                      }
+                    });
 
-                          const remiFieldsArray = [];
-                          const remiFieldsConfig = [
-                            { desc: "remi_one_desc", descCamel: "remiOneDesc", charges: "remi_one_charges", chargesCamel: "remiOneCharges" },
-                            { desc: "remi_two_desc", descCamel: "remiTwoDesc", charges: "remi_two_charges", chargesCamel: "remiTwoCharges" },
-                            { desc: "remi_three_desc", descCamel: "remiThreeDesc", charges: "remi_three_charges", chargesCamel: "remiThreeCharges" },
-                            { desc: "remi_four_desc", descCamel: "remiFourDesc", charges: "remi_four_charges", chargesCamel: "remiFourCharges" },
-                            { desc: "remi_five_desc", descCamel: "remiFiveDesc", charges: "remi_five_charges", chargesCamel: "remiFiveCharges" },
-                          ];
+                    return remiFieldsArray;
+                  };
 
-                          remiFieldsConfig.forEach((field) => {
-                            const description = jobServiceCharge[field.desc] || jobServiceCharge[field.descCamel];
-                            const charges = jobServiceCharge[field.charges] || jobServiceCharge[field.chargesCamel];
+                  // Calculate totals across all jobs first
+                  const totals = {
+                    charges: 0,
+                    caCharges: 0,
+                    ceCharges: 0,
+                    regiOther: 0,
+                    applFee: 0,
+                    remiFields: [0, 0, 0, 0, 0], // R1-R5 totals
+                  };
 
-                            if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-                              let parsedCharges = 0;
-                              const chargesStr = charges !== null && charges !== undefined ? String(charges).trim() : "";
-                              const isChargesEmpty = chargesStr === "" || chargesStr.toUpperCase() === "NULL" || chargesStr === "null";
-                              
-                              if (!isChargesEmpty) {
-                                let numValue = parseFloat(chargesStr);
-                                if (isNaN(numValue) || !isFinite(numValue)) {
-                                  const cleanedStr = chargesStr.replace(/[^\d.-]/g, '');
-                                  numValue = parseFloat(cleanedStr);
-                                }
-                                parsedCharges = (isNaN(numValue) || !isFinite(numValue)) ? 0 : numValue;
-                              }
-
-                              remiFieldsArray.push({
-                                description: String(description).trim(),
-                                charges: parsedCharges,
-                              });
-                            }
-                          });
-
-                          return remiFieldsArray;
+                  // Get remi field descriptions from first job (for total row header)
+                  let totalRemiDescriptions = ["R1", "R2", "R3", "R4", "R5"];
+                  if (selectedJobIds.length > 0) {
+                    const firstJobId = selectedJobIds[0];
+                    const firstJobRemiFields = getRemiFieldsForJob(firstJobId);
+                    const remiFieldsArray = [
+                      { key: "R1", description: "R1", charges: 0 },
+                      { key: "R2", description: "R2", charges: 0 },
+                      { key: "R3", description: "R3", charges: 0 },
+                      { key: "R4", description: "R4", charges: 0 },
+                      { key: "R5", description: "R5", charges: 0 },
+                    ];
+                    firstJobRemiFields.forEach((rf) => {
+                      const index = parseInt(rf.key.replace('R', '')) - 1;
+                      if (index >= 0 && index < 5) {
+                        remiFieldsArray[index] = {
+                          key: rf.key,
+                          description: rf.description,
+                          charges: rf.charges,
                         };
+                      }
+                    });
+                    totalRemiDescriptions = remiFieldsArray.map(rf => rf.description);
+                  }
 
-                        const jobRemiFields = getRemiFieldsForJob(jobId);
+                  // Calculate totals
+                  selectedJobIds.forEach((jobId) => {
+                    const job = jobs.find((j) => j.id === jobId);
+                    const jobServiceCharge = jobServiceChargesMap[jobId];
+                    if (!job) return;
+
+                    // Calculate charges for this job
+                    const jobCharges = jobServiceCharge
+                      ? calculateInvoiceAmount(job, jobServiceCharge)
+                      : { amount: 0 };
+                    totals.charges += jobCharges.amount;
+
+                    // Get registration/other charges
+                    const regiOther = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.registration_other_charges || 0)
+                      : 0;
+                    totals.regiOther += regiOther;
+
+                    // Get CA cert count for this job
+                    const caCertCount = 
+                      getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap) ||
+                      job.no_of_cac;
+                    const caCertCountValue = parseInt(caCertCount) || 0;
+
+                    // Get CE cert count for this job
+                    const ceCertCount = 
+                      getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap) ||
+                      job.no_of_cec;
+                    const ceCertCountValue = parseInt(ceCertCount) || 0;
+
+                    // Get CA charges and multiply by cert count
+                    const caChargesBase = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.ca_charges || 0)
+                      : 0;
+                    const caCharges = caChargesBase * caCertCountValue;
+                    totals.caCharges += caCharges;
+
+                    // Get CE charges and multiply by cert count
+                    const ceChargesBase = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.ce_charges || 0)
+                      : 0;
+                    const ceCharges = ceChargesBase * ceCertCountValue;
+                    totals.ceCharges += ceCharges;
+
+                    // Get application fees
+                    let applFeeValue = 0;
+                    const applFeeFieldValue =
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "appl_fee_duty_paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "Appl Fees Paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "appl_fees_paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "application_fees",
+                        jobFieldValuesMap
+                      );
+                    
+                    if (applFeeFieldValue) {
+                      applFeeValue = parseFloat(applFeeFieldValue || 0);
+                    } else if (jobServiceCharge) {
+                      applFeeValue = parseFloat(jobServiceCharge.application_fees || 0);
+                    }
+                    totals.applFee += applFeeValue;
+
+                    // Get remi fields for this job and add to totals
+                    const jobRemiFields = getRemiFieldsForJob(jobId);
+                    jobRemiFields.forEach((rf) => {
+                      const index = parseInt(rf.key.replace('R', '')) - 1;
+                      if (index >= 0 && index < 5) {
+                        totals.remiFields[index] += rf.charges;
+                      }
+                    });
+                  });
+
+                  return (
+                    <>
+                      {selectedJobIds.map((jobId, sectionIndex) => {
+                        const job = jobs.find((j) => j.id === jobId);
+                        const jobServiceCharge = jobServiceChargesMap[jobId];
                         
-                        // Create a map of remi_desc to charges for this job
-                        const remiChargesMap = {};
-                        jobRemiFields.forEach((rf) => {
-                          remiChargesMap[rf.description] = rf.charges;
-                        });
+                        if (!job) return null;
 
-                        return (
-                          <tr key={jobId}>
-                            <td className="border border-black px-2 py-2">
-                              <div>{index + 1}</div>
-                              <div className="border-t border-black my-1" style={{ width: 'calc(100% + 1rem)', marginLeft: '-0.5rem', marginRight: '-0.5rem' }}></div>
-                              <div>{job.job_no || "NA"}</div>
-                            </td>
-                            <td className="border border-black px-2 py-2">
-                              <div>{applicationNo}</div>
-                              {applicationDate !== "NA" && <div>{applicationDate}</div>}
-                            </td>
-                            {/* Dynamic columns from billingFieldNames */}
-                            {billingFieldNames.slice(0, 4).map((fieldName, fieldIndex) => {
-                              const fieldValue = getFieldValueFromJobFieldValue(
-                                jobId,
-                                fieldName,
-                                jobFieldValuesMap
-                              ) || "NA";
-                              return (
-                                <td key={fieldIndex} className="border border-black px-2 py-2">
-                                  {fieldValue}
-                                </td>
-                              );
-                            })}
-                            {/* Fill remaining dynamic columns if less than 4 */}
-                            {Array.from({ length: Math.max(0, 4 - billingFieldNames.length) }).map((_, fieldIndex) => (
-                              <td key={`empty-${fieldIndex}`} className="border border-black px-2 py-2">
-                                -
-                              </td>
-                            ))}
-                            <td className="border border-black px-2 py-2">
-                              {quantity} {doq !== "NA" ? `(${doq})` : ""}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {jobCharges.amount.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {regiOther.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {caCharges.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {ceCharges.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {applFeeValue.toFixed(2)}
-                            </td>
-                            {/* Dynamic remi_desc columns - display charges for each */}
-                            {uniqueRemiDescs.map((remiDesc, remiIndex) => (
-                              <td key={`remi-${remiIndex}`} className="border border-black px-2 py-2 text-right">
-                                {remiChargesMap[remiDesc] !== undefined ? remiChargesMap[remiDesc].toFixed(2) : "0.00"}
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                          })
-                        );
-                      })()}
-                      {/* Total Row */}
-                      {selectedJobIds.length > 0 && (() => {
-                        // Get all unique remi_desc values for totals in order (remi_one_desc to remi_five_desc)
-                        const getAllUniqueRemiDescsForTotals = () => {
-                          const remiDescOrdered = [];
-                          const seenDescriptions = new Set();
-                          
-                          const remiFieldsConfig = [
-                            { desc: "remi_one_desc", descCamel: "remiOneDesc" },
-                            { desc: "remi_two_desc", descCamel: "remiTwoDesc" },
-                            { desc: "remi_three_desc", descCamel: "remiThreeDesc" },
-                            { desc: "remi_four_desc", descCamel: "remiFourDesc" },
-                            { desc: "remi_five_desc", descCamel: "remiFiveDesc" },
-                          ];
+                    // Get administrative information
+                    const jobNo = job.job_no || "NA";
+                    const applicationDateRaw = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "application_ref_date",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Application Ref Date",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "application_date",
+                      jobFieldValuesMap
+                    ) || job.application_date || "NA";
+                    const applicationDate = formatDateToDDMMYYYY(applicationDateRaw);
 
-                          // Iterate through fields in order and add descriptions as we encounter them
-                          remiFieldsConfig.forEach((field) => {
-                            selectedJobIds.forEach((jid) => {
-                              const jsc = jobServiceChargesMap[jid];
-                              if (!jsc) return;
-                              
-                              const description = jsc[field.desc] || jsc[field.descCamel];
-                              if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-                                const trimmedDesc = String(description).trim();
-                                if (!seenDescriptions.has(trimmedDesc)) {
-                                  seenDescriptions.add(trimmedDesc);
-                                  remiDescOrdered.push(trimmedDesc);
-                                }
-                              }
-                            });
-                          });
+                    const authorisationDateRaw = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "sanction___approval_date",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Sanction Approval Date",
+                      jobFieldValuesMap
+                    ) || job.sanction___approval_date || "NA";
+                    const authorisationDate = formatDateToDDMMYYYY(authorisationDateRaw);
 
-                          return remiDescOrdered;
+                    const fileNo = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "file_no",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "File No",
+                      jobFieldValuesMap
+                    ) || job.file_no || "NA";
+
+                    const applicationNo = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "application_ref_no",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Application Ref No",
+                      jobFieldValuesMap
+                    ) || job.application_ref_no || "NA";
+
+                    const authorisationNo = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "authorisation_no",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Authorisation No",
+                      jobFieldValuesMap
+                    ) || job.authorisation_no || "NA";
+
+                    const port = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "port",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Port",
+                      jobFieldValuesMap
+                    ) || job.port || "NA";
+
+                    const fileDateRaw = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "file_date",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "File Date",
+                      jobFieldValuesMap
+                    ) || job.file_date || "NA";
+                    const fileDate = formatDateToDDMMYYYY(fileDateRaw);
+
+                    const quantity = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "quantity",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Quantity",
+                      jobFieldValuesMap
+                    ) || job.quantity || "NA";
+
+                    const doq = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Description of Quantity",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "description_of_quantity",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "doq",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "DOQ",
+                      jobFieldValuesMap
+                    ) || job.description_of_quantity || job.doq || "NA";
+
+                    // Get claim and refund information
+                    const claimNo = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "claim_no",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Claim No",
+                      jobFieldValuesMap
+                    ) || job.claim_no || "NA";
+
+                    const claimDateRaw = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "dbk_claim_date",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "DBK Claim Date",
+                      jobFieldValuesMap
+                    ) || job.dbk_claim_date || applicationDateRaw;
+                    const claimDate = formatDateToDDMMYYYY(claimDateRaw);
+
+                    const dutyCreditScrip = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "duty_credit_scrip_no",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Duty Credit Scrip No",
+                      jobFieldValuesMap
+                    ) || job.duty_credit_scrip_no || "NA";
+
+                    const refundAmt = getFieldValueFromJobFieldValue(
+                      jobId,
+                      "duty_credit_refund_sanctioned_exempted_amount",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Duty Credit Refund Sanctioned Exempted Amount",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "actual_duty_credit_refund_sanctioned_amount",
+                      jobFieldValuesMap
+                    ) || getFieldValueFromJobFieldValue(
+                      jobId,
+                      "Actual Duty Credit Refund Sanctioned Amount",
+                      jobFieldValuesMap
+                    ) || job.duty_credit_refund_sanctioned_exempted_amount || job.actual_duty_credit_refund_sanctioned_amount || "NA";
+
+                    // Calculate charges for this job
+                    const jobCharges = jobServiceCharge
+                      ? calculateInvoiceAmount(job, jobServiceCharge)
+                      : { amount: 0 };
+
+                    // Get registration/other charges
+                    const regiOther = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.registration_other_charges || 0)
+                      : 0;
+
+                    // Get CA cert count for this job
+                    const caCertCount = 
+                      getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap) ||
+                      job.no_of_cac;
+                    const caCertCountValue = parseInt(caCertCount) || 0;
+
+                    // Get CE cert count for this job
+                    const ceCertCount = 
+                      getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
+                      getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap) ||
+                      job.no_of_cec;
+                    const ceCertCountValue = parseInt(ceCertCount) || 0;
+
+                    // Get CA charges and multiply by cert count
+                    const caChargesBase = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.ca_charges || 0)
+                      : 0;
+                    const caCharges = caChargesBase * caCertCountValue;
+
+                    // Get CE charges and multiply by cert count
+                    const ceChargesBase = jobServiceCharge
+                      ? parseFloat(jobServiceCharge.ce_charges || 0)
+                      : 0;
+                    const ceCharges = ceChargesBase * ceCertCountValue;
+
+                    // Get application fees
+                    let applFeeValue = 0;
+                    const applFeeFieldValue =
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "appl_fee_duty_paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "Appl Fees Paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "appl_fees_paid",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobId,
+                        "application_fees",
+                        jobFieldValuesMap
+                      );
+                    
+                    if (applFeeFieldValue) {
+                      applFeeValue = parseFloat(applFeeFieldValue || 0);
+                    } else if (jobServiceCharge) {
+                      applFeeValue = parseFloat(jobServiceCharge.application_fees || 0);
+                    }
+
+                    // Get remi fields for this job
+                    const jobRemiFields = getRemiFieldsForJob(jobId);
+                    
+                    // Create an array of remi fields in order (R1-R5), ensuring we always have 5 entries
+                    const remiFieldsArray = [
+                      { key: "R1", description: "R1", charges: 0 },
+                      { key: "R2", description: "R2", charges: 0 },
+                      { key: "R3", description: "R3", charges: 0 },
+                      { key: "R4", description: "R4", charges: 0 },
+                      { key: "R5", description: "R5", charges: 0 },
+                    ];
+                    
+                    // Map the actual remi fields to their positions
+                    jobRemiFields.forEach((rf) => {
+                      const index = parseInt(rf.key.replace('R', '')) - 1;
+                      if (index >= 0 && index < 5) {
+                        remiFieldsArray[index] = {
+                          key: rf.key,
+                          description: rf.description,
+                          charges: rf.charges,
                         };
-                        const uniqueRemiDescsForTotals = getAllUniqueRemiDescsForTotals();
+                      }
+                    });
 
-                        // Calculate totals for all numeric columns
-                        let totalCharges = 0;
-                        let totalRegiOther = 0;
-                        let totalCaCharges = 0;
-                        let totalCeCharges = 0;
-                        let totalApplFee = 0;
-                        const totalRemiCharges = {};
+                    // Get descriptive text from job.remark
+                    const descriptiveText = job.remark || "";
 
-                        // Initialize totals for all unique remi_desc
-                        uniqueRemiDescsForTotals.forEach((remiDesc) => {
-                          totalRemiCharges[remiDesc] = 0;
-                        });
+                    return (
+                      <div key={jobId} className={`mb-8 ${sectionIndex > 0 ? 'print:page-break-before-always' : ''}`}>
+                        {/* Administrative Information Section */}
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          {/* Left Column */}
+                          <div className="text-xs">
+                            <div>Job No: {jobNo}</div>
+                            <div>Application Date: {applicationDate}</div>
+                            <div>Authorisation Date: {authorisationDate}</div>
+                            <div>File No: {fileNo}</div>
+                          </div>
+                          {/* Right Column */}
+                          <div className="text-xs">
+                            <div>Application No: {applicationNo}</div>
+                            <div>Authorisation No: {authorisationNo}</div>
+                            <div>Port: {port}</div>
+                            <div>File Date: {fileDate}</div>
+                            <div>Quantity: {quantity}</div>
+                            <div>DOQ: {doq}</div>
+                          </div>
+                        </div>
 
-                        // Calculate totals from all jobs
-                        selectedJobIds.forEach((jobId) => {
-                          const job = jobs.find((j) => j.id === jobId);
-                          const jobServiceCharge = jobServiceChargesMap[jobId];
-                          
-                          if (!job || !jobServiceCharge) return;
+                        {/* Table Section */}
+                        <div className="overflow-x-auto mb-4">
+                          <table className="w-full border-collapse border border-black text-xs">
+                            <thead>
+                              <tr className="bg-white text-black">
+                                <th className="border border-black px-2 py-2 text-left font-bold">Claim No</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">Duty Credit Scrip</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">Refund Amt</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">Charges</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">CA Charges</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">CE Charges</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">Regi/Oth</th>
+                                <th className="border border-black px-2 py-2 text-left font-bold">App Fee</th>
+                                {remiFieldsArray.map((remiField, index) => (
+                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                    {remiField.description}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td className="border border-black px-2 py-2">
+                                  <div>{claimNo}</div>
+                                </td>
+                                <td className="border border-black px-2 py-2">
+                                  {dutyCreditScrip !== "NA" 
+                                    ? (typeof dutyCreditScrip === 'string' && dutyCreditScrip.startsWith('D-') 
+                                        ? dutyCreditScrip 
+                                        : `D-${dutyCreditScrip}`)
+                                    : "NA"}
+                                </td>
+                                <td className="border border-black px-2 py-2">
+                                  {refundAmt !== "NA" 
+                                    ? (typeof refundAmt === 'string' && refundAmt.startsWith('R-') 
+                                        ? refundAmt 
+                                        : `R-${refundAmt}`)
+                                    : "NA"}
+                                </td>
+                                <td className="border border-black px-2 py-2 text-right">{jobCharges.amount.toFixed(2)}</td>
+                                <td className="border border-black px-2 py-2 text-right">{caCharges.toFixed(2)}</td>
+                                <td className="border border-black px-2 py-2 text-right">{ceCharges.toFixed(2)}</td>
+                                <td className="border border-black px-2 py-2 text-right">{regiOther.toFixed(2)}</td>
+                                <td className="border border-black px-2 py-2 text-right">{applFeeValue.toFixed(2)}</td>
+                                {remiFieldsArray.map((remiField, index) => (
+                                  <td key={index} className="border border-black px-2 py-2 text-right">
+                                    {remiField.charges.toFixed(2)}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
 
-                          // Calculate charges for this job
-                          const jobCharges = calculateInvoiceAmount(job, jobServiceCharge);
-                          totalCharges += jobCharges.amount || 0;
-
-                          // Registration/other charges
-                          totalRegiOther += parseFloat(jobServiceCharge.registration_other_charges || 0);
-
-                          // CA charges (multiplied by cert count)
-                          const caCertCount = 
-                            getFieldValueFromJobFieldValue(jobId, "no_of_cac", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "No of CAC", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "noofcac", jobFieldValuesMap);
-                          const caCertCountValue = parseInt(caCertCount) || 0;
-                          const caChargesBase = parseFloat(jobServiceCharge.ca_charges || 0);
-                          totalCaCharges += caChargesBase * caCertCountValue;
-
-                          // CE charges (multiplied by cert count)
-                          const ceCertCount = 
-                            getFieldValueFromJobFieldValue(jobId, "no_of_cec", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "No of CEC", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "noofcec", jobFieldValuesMap);
-                          const ceCertCountValue = parseInt(ceCertCount) || 0;
-                          const ceChargesBase = parseFloat(jobServiceCharge.ce_charges || 0);
-                          totalCeCharges += ceChargesBase * ceCertCountValue;
-
-                          // Application fees
-                          const applFeeFieldValue =
-                            getFieldValueFromJobFieldValue(jobId, "appl_fee_duty_paid", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "Appl Fees Paid", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "appl_fees_paid", jobFieldValuesMap) ||
-                            getFieldValueFromJobFieldValue(jobId, "application_fees", jobFieldValuesMap);
-                          
-                          if (applFeeFieldValue) {
-                            totalApplFee += parseFloat(applFeeFieldValue || 0);
-                          } else if (jobServiceCharge.application_fees) {
-                            totalApplFee += parseFloat(jobServiceCharge.application_fees || 0);
-                          }
-
-                          // Remi charges
-                          const getRemiFieldsForJob = (jid) => {
-                            const jsc = jobServiceChargesMap[jid];
-                            if (!jsc) return [];
-                            const remiFieldsArray = [];
-                            const remiFieldsConfig = [
-                              { desc: "remi_one_desc", descCamel: "remiOneDesc", charges: "remi_one_charges", chargesCamel: "remiOneCharges" },
-                              { desc: "remi_two_desc", descCamel: "remiTwoDesc", charges: "remi_two_charges", chargesCamel: "remiTwoCharges" },
-                              { desc: "remi_three_desc", descCamel: "remiThreeDesc", charges: "remi_three_charges", chargesCamel: "remiThreeCharges" },
-                              { desc: "remi_four_desc", descCamel: "remiFourDesc", charges: "remi_four_charges", chargesCamel: "remiFourCharges" },
-                              { desc: "remi_five_desc", descCamel: "remiFiveDesc", charges: "remi_five_charges", chargesCamel: "remiFiveCharges" },
-                            ];
-                            remiFieldsConfig.forEach((field) => {
-                              const description = jsc[field.desc] || jsc[field.descCamel];
-                              const charges = jsc[field.charges] || jsc[field.chargesCamel];
-                              if (description && description !== null && description !== undefined && String(description).trim() !== "" && String(description).toUpperCase() !== "NULL") {
-                                let parsedCharges = 0;
-                                const chargesStr = charges !== null && charges !== undefined ? String(charges).trim() : "";
-                                const isChargesEmpty = chargesStr === "" || chargesStr.toUpperCase() === "NULL" || chargesStr === "null";
-                                if (!isChargesEmpty) {
-                                  let numValue = parseFloat(chargesStr);
-                                  if (isNaN(numValue) || !isFinite(numValue)) {
-                                    const cleanedStr = chargesStr.replace(/[^\d.-]/g, '');
-                                    numValue = parseFloat(cleanedStr);
-                                  }
-                                  parsedCharges = (isNaN(numValue) || !isFinite(numValue)) ? 0 : numValue;
-                                }
-                                remiFieldsArray.push({
-                                  description: String(description).trim(),
-                                  charges: parsedCharges,
-                                });
-                              }
-                            });
-                            return remiFieldsArray;
-                          };
-
-                          const jobRemiFields = getRemiFieldsForJob(jobId);
-                          jobRemiFields.forEach((rf) => {
-                            if (totalRemiCharges[rf.description] !== undefined) {
-                              totalRemiCharges[rf.description] += rf.charges;
-                            }
-                          });
-                        });
-
-                        // Count non-numeric columns before the numeric ones
-                        // Sr.No./Job No. (1) + Application No & Date (1) + Dynamic columns (4) + Qty & DOQ (1) = 7 columns
-                        const nonNumericColumns = 7;
-
-                        return (
-                          <tr className="bg-white text-black font-bold">
-                            <td colSpan={nonNumericColumns} className="border border-black px-2 py-2 text-left">
-                              TOTAL
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {totalCharges.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {totalRegiOther.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {totalCaCharges.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {totalCeCharges.toFixed(2)}
-                            </td>
-                            <td className="border border-black px-2 py-2 text-right">
-                              {totalApplFee.toFixed(2)}
-                            </td>
-                            {/* Dynamic remi_desc totals */}
-                            {uniqueRemiDescsForTotals.map((remiDesc, remiIndex) => (
-                              <td key={`total-remi-${remiIndex}`} className="border border-black px-2 py-2 text-right">
-                                {totalRemiCharges[remiDesc] !== undefined ? totalRemiCharges[remiDesc].toFixed(2) : "0.00"}
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
+                        {/* Descriptive Text Section */}
+                        {descriptiveText && (
+                          <div className="text-xs mb-4">
+                            descriptive : {descriptiveText}
+                          </div>
+                        )}
+                      </div>
+                    );
+                      })}
+                      
+                      {/* Total Row Section */}
+                      <div className="mt-8">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-xs">
+                            <tbody>
+                              <tr>
+                                <td 
+                                  colSpan={3}
+                                  className="px-4 py-3 text-center font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderRight: '1px solid #9ca3af',
+                                    borderRadius: '8px 0 0 8px',
+                                  }}
+                                >
+                                  TOTAL
+                                </td>
+                                <td 
+                                  className="px-2 py-3 text-right font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderLeft: 'none',
+                                  }}
+                                >
+                                  {totals.charges.toFixed(2)}
+                                </td>
+                                <td 
+                                  className="px-2 py-3 text-right font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderLeft: 'none',
+                                  }}
+                                >
+                                  {totals.caCharges.toFixed(2)}
+                                </td>
+                                <td 
+                                  className="px-2 py-3 text-right font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderLeft: 'none',
+                                  }}
+                                >
+                                  {totals.ceCharges.toFixed(2)}
+                                </td>
+                                <td 
+                                  className="px-2 py-3 text-right font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderLeft: 'none',
+                                  }}
+                                >
+                                  {totals.regiOther.toFixed(2)}
+                                </td>
+                                <td 
+                                  className="px-2 py-3 text-right font-bold text-black bg-white"
+                                  style={{
+                                    border: '1px solid #9ca3af',
+                                    borderLeft: 'none',
+                                  }}
+                                >
+                                  {totals.applFee.toFixed(2)}
+                                </td>
+                                {totals.remiFields.map((remiTotal, index) => (
+                                  <td 
+                                    key={index}
+                                    className="px-2 py-3 text-right font-bold text-black bg-white"
+                                    style={{
+                                      border: '1px solid #9ca3af',
+                                      borderLeft: 'none',
+                                      ...(index === totals.remiFields.length - 1 ? { borderRadius: '0 8px 8px 0' } : {}),
+                                    }}
+                                  >
+                                    {remiTotal.toFixed(2)}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}

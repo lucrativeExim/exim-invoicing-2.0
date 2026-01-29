@@ -8,7 +8,9 @@ import { useTableSearch } from '@/hooks/useTableSearch';
 import { usePagination } from '@/hooks/usePagination';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
+import { formatInvoiceType, getInvoiceTypeBadgeVariant } from '@/utils/invoiceUtils';
 import Pagination from '@/components/Pagination';
+import Badge from '@/components/Badge';
 
 export default function InvoicesPage() {
   const router = useRouter();
@@ -224,7 +226,16 @@ export default function InvoicesPage() {
                           {invoice.billing_type || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {invoice.invoice_type || '-'}
+                          {invoice.invoice_type ? (
+                            <Badge 
+                              variant={getInvoiceTypeBadgeVariant(invoice.invoice_type)}
+                              size="sm"
+                            >
+                              {formatInvoiceType(invoice.invoice_type)}
+                            </Badge>
+                          ) : (
+                            '-'
+                          )}
                         </td> 
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDateDDMMYYYY(

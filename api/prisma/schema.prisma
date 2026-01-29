@@ -630,6 +630,8 @@ model Invoice {
   @@index([status], name: "idx_status")
   @@index([invoice_status], name: "idx_invoice_status")
   @@index([invoice_stage_status], name: "idx_invoice_stage_status")
+  @@index([billing_type], name: "idx_billing_type")
+  @@index([invoice_status, billing_type], name: "idx_invoice_status_billing_type")
   @@index([created_at], name: "idx_created_at")
   @@index([added_by], name: "idx_added_by")
   @@index([canceled_by], name: "idx_canceled_by")

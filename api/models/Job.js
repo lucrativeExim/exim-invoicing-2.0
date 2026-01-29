@@ -96,6 +96,9 @@ class JobModel {
       status = null,
       invoiceType = null,
       jobIdStatus = null,
+      excludeInvoices = false,
+      accountId = null,
+      billingType = null,
     } = options;
 
     const where = {};
@@ -116,6 +119,82 @@ class JobModel {
     
     if (invoiceType) {
       where.invoice_type = invoiceType;
+    }
+
+    // Filter by account_id through clientInfo relation
+    if (accountId) {
+      where.clientInfo = {
+        account_id: parseInt(accountId),
+      };
+    }
+
+    // Filter by billing_type
+    // Frontend sends: "Service", "Service_Reimbursement", "Reimbursement" (database enum values)
+    // Backend maps these to database values:
+    // - "Service" -> 'Service' OR 'Service_Reimbursement_Split'
+    // - "Service_Reimbursement" -> 'Service_Reimbursement'
+    // - "Reimbursement" -> 'Reimbursement' OR 'Service_Reimbursement_Split'
+    if (billingType) {
+      if (billingType === 'Service') {
+        where.billing_type = {
+          in: ['Service', 'Service_Reimbursement_Split'],
+        };
+      } else if (billingType === 'Service_Reimbursement') {
+        where.billing_type = 'Service_Reimbursement';
+      } else if (billingType === 'Reimbursement') {
+        where.billing_type = {
+          in: ['Reimbursement', 'Service_Reimbursement_Split'],
+        };
+      } else {
+        // If it's a direct database value, use it as-is
+        where.billing_type = billingType;
+      }
+    }
+
+    // Exclude jobs that have invoices with invoice_status = 'Active' and matching billing_type
+    // This ensures that a job invoiced for Service can still show when filtering for Reimbursement (and vice versa)
+    if (excludeInvoices && billingType) {
+      // Determine which invoice billing_types should exclude this job based on the filter
+      let excludeInvoiceBillingTypes = [];
+      
+      if (billingType === 'Service') {
+        // When filtering for Service, exclude jobs with active invoices for Service
+        // But NOT exclude if they only have invoices for Reimbursement
+        excludeInvoiceBillingTypes = ['Service'];
+      } else if (billingType === 'Reimbursement') {
+        // When filtering for Reimbursement, exclude jobs with active invoices for Reimbursement
+        // But NOT exclude if they only have invoices for Service
+        excludeInvoiceBillingTypes = ['Reimbursement'];
+      } else if (billingType === 'Service_Reimbursement') {
+        // When filtering for Service_Reimbursement, exclude jobs with active invoices for Service_Reimbursement
+        excludeInvoiceBillingTypes = ['Service_Reimbursement'];
+      }
+      
+      if (excludeInvoiceBillingTypes.length > 0) {
+        where.NOT = {
+          invoiceSelectedJobs: {
+            some: {
+              invoice: {
+                invoice_status: 'Active',
+                billing_type: {
+                  in: excludeInvoiceBillingTypes,
+                },
+              },
+            },
+          },
+        };
+      }
+    } else if (excludeInvoices) {
+      // If excludeInvoices is true but no billingType filter, exclude all active invoices
+      where.NOT = {
+        invoiceSelectedJobs: {
+          some: {
+            invoice: {
+              invoice_status: 'Active',
+            },
+          },
+        },
+      };
     }
 
     const jobs = await prisma.job.findMany({
@@ -174,6 +253,7 @@ class JobModel {
                 id: true,
                 invoice_status: true,
                 invoice_stage_status: true,
+                billing_type: true,
               },
             },
           },

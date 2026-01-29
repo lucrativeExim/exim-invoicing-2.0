@@ -6,11 +6,9 @@ import { accessControl } from '@/services/accessControl';
 import { Button, SelectBox, Input } from '@/components/formComponents';
 import Toast from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
-import { usePagination } from '@/hooks/usePagination';
 import JobRegisterForm from './JobRegisterForm';
 import Tabs from '@/components/Tabs';
 import api from '@/services/api';
-import Pagination from '@/components/Pagination';
 import {
   DndContext,
   closestCenter,
@@ -872,9 +870,6 @@ export default function JobRegisterPage({ mode = 'add' }) {
       // Return Yes fields first, then No fields
       return [...existingYesFields.map(item => item.field), ...noFields];
     })();
-
-    // Pagination for fields table
-    const pagination = usePagination(sortedFields, { itemsPerPage: 10 });
     
     const handleFieldChange = (fieldId, value, isDefault) => {
       // Don't allow changing if it's a default field
@@ -1032,7 +1027,7 @@ export default function JobRegisterPage({ mode = 'add' }) {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {pagination.paginatedData.map((field) => {
+                {sortedFields.map((field) => {
                   const isDefault = field.default_value === true;
                   const isSelected = selectedFields[field.id] || field.default_value === true;
                   const useFieldValue = isSelected ? 'yes' : 'no';
@@ -1071,16 +1066,6 @@ export default function JobRegisterPage({ mode = 'add' }) {
               </tbody>
             </table>
           </div>
-        )}
-        {sortedFields.length > 0 && (
-          <Pagination
-            currentPage={pagination.currentPage}
-            totalPages={pagination.totalPages}
-            totalItems={pagination.totalItems}
-            itemsPerPage={pagination.itemsPerPage}
-            onPageChange={pagination.setCurrentPage}
-            onItemsPerPageChange={pagination.setItemsPerPage}
-          />
         )}
       </div>
     );
