@@ -4149,6 +4149,416 @@ export default function InvoiceCreationPage() {
                     return remiFieldsArray;
                   };
 
+                  // Helper function to get dynamic amount fields
+                  const getDynamicAmountFields = (jobId, job, jobFieldValuesMap) => {
+                    const fields = [
+                      {
+                        name: "Exem Amt",
+                        keys: [
+                          "exempted_amount",
+                          "Exempted Amount",
+                          "exemptedamount",
+                          "exempted_amt",
+                          "Exempted Amt"
+                        ],
+                        jobKeys: ["exempted_amount"]
+                      },
+                      {
+                        name: "Duty Cre Amt",
+                        keys: [
+                          "duty_credit_amount",
+                          "Duty Credit Amount",
+                          "dutycreditamount",
+                          "duty_credit_amt",
+                          "Duty Credit Amt"
+                        ],
+                        jobKeys: ["duty_credit_amount"]
+                      },
+                      {
+                        name: "Act Duty Cre Amt",
+                        keys: [
+                          "actual_duty_credit_amount",
+                          "Actual Duty Credit Amount",
+                          "actualdutycreditamount",
+                          "actual_duty_credit_amt",
+                          "Actual Duty Credit Amt"
+                        ],
+                        jobKeys: ["actual_duty_credit_amount"]
+                      },
+                      {
+                        name: "Lic Amt",
+                        keys: [
+                          "license_amount",
+                          "License Amount",
+                          "licenseamount",
+                          "license_amt",
+                          "License Amt"
+                        ],
+                        jobKeys: ["license_amount"]
+                      },
+                      {
+                        name: "Ref Amt",
+                        keys: [
+                          "refund_amount",
+                          "Refund Amount",
+                          "refundamount",
+                          "refund_amt",
+                          "Refund Amt",
+                          "duty_credit_refund_sanctioned_exempted_amount",
+                          "Duty Credit Refund Sanctioned Exempted Amount"
+                        ],
+                        jobKeys: ["refund_amount", "duty_credit_refund_sanctioned_exempted_amount"]
+                      },
+                      {
+                        name: "Act Ref Amt",
+                        keys: [
+                          "actual_refund_amount",
+                          "Actual Refund Amount",
+                          "actualrefundamount",
+                          "actual_refund_amt",
+                          "Actual Refund Amt"
+                        ],
+                        jobKeys: ["actual_refund_amount"]
+                      },
+                      {
+                        name: "San Amt",
+                        keys: [
+                          "sanctioned_amount",
+                          "Sanctioned Amount",
+                          "sanctionedamount",
+                          "sanctioned_amt",
+                          "Sanctioned Amt"
+                        ],
+                        jobKeys: ["sanctioned_amount"]
+                      },
+                      {
+                        name: "Act Sanc Amt",
+                        keys: [
+                          "actual_sanctioned_amount",
+                          "Actual Sanctioned Amount",
+                          "actualsanctionedamount",
+                          "actual_sanctioned_amt",
+                          "Actual Sanctioned Amt",
+                          "actual_duty_credit_refund_sanctioned_amount",
+                          "Actual Duty Credit Refund Sanctioned Amount"
+                        ],
+                        jobKeys: ["actual_sanctioned_amount", "actual_duty_credit_refund_sanctioned_amount"]
+                      }
+                    ];
+
+                    const availableFields = [];
+
+                    fields.forEach(field => {
+                      let value = null;
+
+                      // Try to get value from jobFieldValuesMap first
+                      for (const key of field.keys) {
+                        const fieldValue = getFieldValueFromJobFieldValue(
+                          jobId,
+                          key,
+                          jobFieldValuesMap
+                        );
+                        if (fieldValue && fieldValue !== "NA" && fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim() !== "") {
+                          value = fieldValue;
+                          break;
+                        }
+                      }
+
+                      // If not found in jobFieldValuesMap, try job object
+                      if (!value || value === "NA") {
+                        for (const jobKey of field.jobKeys) {
+                          if (job[jobKey] && job[jobKey] !== "NA" && job[jobKey] !== null && job[jobKey] !== undefined && String(job[jobKey]).trim() !== "") {
+                            value = job[jobKey];
+                            break;
+                          }
+                        }
+                      }
+
+                      // If value exists and is not "NA", add to available fields
+                      if (value && value !== "NA" && value !== null && value !== undefined && String(value).trim() !== "") {
+                        availableFields.push({
+                          name: field.name,
+                          value: value
+                        });
+                      }
+                    });
+
+                    return availableFields;
+                  };
+
+                  // Helper function to get dynamic combined field pairs (No & Date)
+                  const getDynamicCombinedFields = (jobId, job, jobFieldValuesMap) => {
+                    const formatDateToDDMMYYYY = (dateStr) => {
+                      if (!dateStr || dateStr === "NA" || dateStr === null || dateStr === undefined) {
+                        return "NA";
+                      }
+                      try {
+                        const date = new Date(dateStr);
+                        if (!isNaN(date.getTime())) {
+                          const day = String(date.getDate()).padStart(2, '0');
+                          const month = String(date.getMonth() + 1).padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}-${month}-${year}`;
+                        }
+                        return String(dateStr);
+                      } catch (e) {
+                        return String(dateStr);
+                      }
+                    };
+
+                    const fieldPairs = [
+                      {
+                        header: "Aut No & Date",
+                        noField: {
+                          keys: [
+                            "authorisation_no",
+                            "Authorisation No",
+                            "authorisationno",
+                            "auth_no",
+                            "Auth No"
+                          ],
+                          jobKeys: ["authorisation_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "sanction___approval_date",
+                            "Sanction Approval Date",
+                            "authorisation_date",
+                            "Authorisation Date",
+                            "auth_date",
+                            "Auth Date"
+                          ],
+                          jobKeys: ["sanction___approval_date", "authorisation_date"]
+                        }
+                      },
+                      {
+                        header: "Duty Credit No & Date",
+                        noField: {
+                          keys: [
+                            "duty_credit_scrip_no",
+                            "Duty Credit Scrip No",
+                            "dutycreditscripno",
+                            "duty_credit_no",
+                            "Duty Credit No"
+                          ],
+                          jobKeys: ["duty_credit_scrip_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "duty_credit_scrip_date",
+                            "Duty Credit Scrip Date",
+                            "dutycreditscripdate",
+                            "duty_credit_date",
+                            "Duty Credit Date"
+                          ],
+                          jobKeys: ["duty_credit_scrip_date"]
+                        }
+                      },
+                      {
+                        header: "Lic No & Date",
+                        noField: {
+                          keys: [
+                            "license_no",
+                            "License No",
+                            "licenseno",
+                            "lic_no",
+                            "Lic No"
+                          ],
+                          jobKeys: ["license_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "license_date",
+                            "License Date",
+                            "licensedate",
+                            "lic_date",
+                            "Lic Date"
+                          ],
+                          jobKeys: ["license_date"]
+                        }
+                      },
+                      {
+                        header: "Cert No & Date",
+                        noField: {
+                          keys: [
+                            "certificate_no",
+                            "Certificate No",
+                            "certificateno",
+                            "cert_no",
+                            "Cert No"
+                          ],
+                          jobKeys: ["certificate_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "certificate_date",
+                            "Certificate Date",
+                            "certificatedate",
+                            "cert_date",
+                            "Cert Date"
+                          ],
+                          jobKeys: ["certificate_date"]
+                        }
+                      },
+                      {
+                        header: "Refund No & Date",
+                        noField: {
+                          keys: [
+                            "refund_sanction_order_no",
+                            "Refund Sanction Order No",
+                            "refundsanctionorderno",
+                            "refund_no",
+                            "Refund No"
+                          ],
+                          jobKeys: ["refund_sanction_order_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "refund_sanction_order_date",
+                            "Refund Sanction Order Date",
+                            "refundsanctionorderdate",
+                            "refund_date",
+                            "Refund Date"
+                          ],
+                          jobKeys: ["refund_sanction_order_date"]
+                        }
+                      },
+                      {
+                        header: "Sanc Ord No & Date",
+                        noField: {
+                          keys: [
+                            "sanction_order_no",
+                            "Sanction Order No",
+                            "sanctionorderno",
+                            "sanc_ord_no",
+                            "Sanc Ord No"
+                          ],
+                          jobKeys: ["sanction_order_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "sanction_order_date",
+                            "Sanction Order Date",
+                            "sanctionorderdate",
+                            "sanc_ord_date",
+                            "Sanc Ord Date"
+                          ],
+                          jobKeys: ["sanction_order_date"]
+                        }
+                      },
+                      {
+                        header: "Brand Rate Lett No & Date",
+                        noField: {
+                          keys: [
+                            "brand_rate_letter_no",
+                            "Brand Rate Letter No",
+                            "brandrateletterno",
+                            "brand_rate_lett_no",
+                            "Brand Rate Lett No"
+                          ],
+                          jobKeys: ["brand_rate_letter_no"]
+                        },
+                        dateField: {
+                          keys: [
+                            "brand_rate_letter_date",
+                            "Brand Rate Letter Date",
+                            "brandrateletterdate",
+                            "brand_rate_lett_date",
+                            "Brand Rate Lett Date"
+                          ],
+                          jobKeys: ["brand_rate_letter_date"]
+                        }
+                      }
+                    ];
+
+                    const availableFields = [];
+
+                    fieldPairs.forEach(pair => {
+                      let noValue = null;
+                      let dateValue = null;
+
+                      // Try to get No value from jobFieldValuesMap first
+                      for (const key of pair.noField.keys) {
+                        const fieldValue = getFieldValueFromJobFieldValue(
+                          jobId,
+                          key,
+                          jobFieldValuesMap
+                        );
+                        if (fieldValue && fieldValue !== "NA" && fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim() !== "") {
+                          noValue = fieldValue;
+                          break;
+                        }
+                      }
+
+                      // If not found in jobFieldValuesMap, try job object
+                      if (!noValue || noValue === "NA") {
+                        for (const jobKey of pair.noField.jobKeys) {
+                          if (job[jobKey] && job[jobKey] !== "NA" && job[jobKey] !== null && job[jobKey] !== undefined && String(job[jobKey]).trim() !== "") {
+                            noValue = job[jobKey];
+                            break;
+                          }
+                        }
+                      }
+
+                      // Try to get Date value from jobFieldValuesMap first
+                      for (const key of pair.dateField.keys) {
+                        const fieldValue = getFieldValueFromJobFieldValue(
+                          jobId,
+                          key,
+                          jobFieldValuesMap
+                        );
+                        if (fieldValue && fieldValue !== "NA" && fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim() !== "") {
+                          dateValue = fieldValue;
+                          break;
+                        }
+                      }
+
+                      // If not found in jobFieldValuesMap, try job object
+                      if (!dateValue || dateValue === "NA") {
+                        for (const jobKey of pair.dateField.jobKeys) {
+                          if (job[jobKey] && job[jobKey] !== "NA" && job[jobKey] !== null && job[jobKey] !== undefined && String(job[jobKey]).trim() !== "") {
+                            dateValue = job[jobKey];
+                            break;
+                          }
+                        }
+                      }
+
+                      // If at least one value exists and is not "NA", add to available fields
+                      if ((noValue && noValue !== "NA" && noValue !== null && noValue !== undefined && String(noValue).trim() !== "") ||
+                          (dateValue && dateValue !== "NA" && dateValue !== null && dateValue !== undefined && String(dateValue).trim() !== "")) {
+                        // Format the no value (add D- prefix if it's duty credit scrip and doesn't start with D-)
+                        let formattedNo = noValue && noValue !== "NA" ? String(noValue) : "NA";
+                        if (pair.header === "Duty Credit No & Date" && formattedNo !== "NA" && typeof formattedNo === 'string' && !formattedNo.startsWith('D-')) {
+                          formattedNo = `D-${formattedNo}`;
+                        }
+
+                        // Format the date value
+                        const formattedDate = dateValue && dateValue !== "NA" ? formatDateToDDMMYYYY(dateValue) : "NA";
+
+                        // Combine both values
+                        let combinedValue = "";
+                        if (formattedNo !== "NA" && formattedDate !== "NA") {
+                          combinedValue = `${formattedNo} / ${formattedDate}`;
+                        } else if (formattedNo !== "NA") {
+                          combinedValue = formattedNo;
+                        } else if (formattedDate !== "NA") {
+                          combinedValue = formattedDate;
+                        } else {
+                          combinedValue = "NA";
+                        }
+
+                        availableFields.push({
+                          header: pair.header,
+                          noValue: formattedNo,
+                          dateValue: formattedDate,
+                          combinedValue: combinedValue
+                        });
+                      }
+                    });
+
+                    return availableFields;
+                  };
+
                   // Calculate totals across all jobs first
                   const totals = {
                     charges: 0,
@@ -4161,8 +4571,11 @@ export default function InvoiceCreationPage() {
 
                   // Get remi field descriptions from first job (for total row header)
                   let totalRemiDescriptions = ["R1", "R2", "R3", "R4", "R5"];
+                  let totalDynamicAmountFieldsCount = 0;
+                  let totalDynamicCombinedFieldsCount = 0;
                   if (selectedJobIds.length > 0) {
                     const firstJobId = selectedJobIds[0];
+                    const firstJob = jobs.find((j) => j.id === firstJobId);
                     const firstJobRemiFields = getRemiFieldsForJob(firstJobId);
                     const remiFieldsArray = [
                       { key: "R1", description: "R1", charges: 0 },
@@ -4182,6 +4595,16 @@ export default function InvoiceCreationPage() {
                       }
                     });
                     totalRemiDescriptions = remiFieldsArray.map(rf => rf.description);
+                    
+                    // Get dynamic amount fields count for first job (for total row colspan)
+                    if (firstJob) {
+                      const firstJobDynamicFields = getDynamicAmountFields(firstJobId, firstJob, jobFieldValuesMap);
+                      totalDynamicAmountFieldsCount = firstJobDynamicFields.length;
+                      
+                      // Get dynamic combined fields count for first job (for total row colspan)
+                      const firstJobCombinedFields = getDynamicCombinedFields(firstJobId, firstJob, jobFieldValuesMap);
+                      totalDynamicCombinedFieldsCount = firstJobCombinedFields.length;
+                    }
                   }
 
                   // Calculate totals
@@ -4410,33 +4833,11 @@ export default function InvoiceCreationPage() {
                     ) || job.dbk_claim_date || applicationDateRaw;
                     const claimDate = formatDateToDDMMYYYY(claimDateRaw);
 
-                    const dutyCreditScrip = getFieldValueFromJobFieldValue(
-                      jobId,
-                      "duty_credit_scrip_no",
-                      jobFieldValuesMap
-                    ) || getFieldValueFromJobFieldValue(
-                      jobId,
-                      "Duty Credit Scrip No",
-                      jobFieldValuesMap
-                    ) || job.duty_credit_scrip_no || "NA";
+                    // Get dynamic combined fields (No & Date pairs) for this job
+                    const dynamicCombinedFields = getDynamicCombinedFields(jobId, job, jobFieldValuesMap);
 
-                    const refundAmt = getFieldValueFromJobFieldValue(
-                      jobId,
-                      "duty_credit_refund_sanctioned_exempted_amount",
-                      jobFieldValuesMap
-                    ) || getFieldValueFromJobFieldValue(
-                      jobId,
-                      "Duty Credit Refund Sanctioned Exempted Amount",
-                      jobFieldValuesMap
-                    ) || getFieldValueFromJobFieldValue(
-                      jobId,
-                      "actual_duty_credit_refund_sanctioned_amount",
-                      jobFieldValuesMap
-                    ) || getFieldValueFromJobFieldValue(
-                      jobId,
-                      "Actual Duty Credit Refund Sanctioned Amount",
-                      jobFieldValuesMap
-                    ) || job.duty_credit_refund_sanctioned_exempted_amount || job.actual_duty_credit_refund_sanctioned_amount || "NA";
+                    // Get dynamic amount fields for this job
+                    const dynamicAmountFields = getDynamicAmountFields(jobId, job, jobFieldValuesMap);
 
                     // Calculate charges for this job
                     const jobCharges = jobServiceCharge
@@ -4561,8 +4962,16 @@ export default function InvoiceCreationPage() {
                             <thead>
                               <tr className="bg-white text-black">
                                 <th className="border border-black px-2 py-2 text-left font-bold">Claim No</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">Duty Credit Scrip</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">Refund Amt</th>
+                                {dynamicCombinedFields.map((field, index) => (
+                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                    {field.header}
+                                  </th>
+                                ))}
+                                {dynamicAmountFields.map((field, index) => (
+                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                    {field.name}
+                                  </th>
+                                ))}
                                 <th className="border border-black px-2 py-2 text-left font-bold">Charges</th>
                                 <th className="border border-black px-2 py-2 text-left font-bold">CA Charges</th>
                                 <th className="border border-black px-2 py-2 text-left font-bold">CE Charges</th>
@@ -4580,20 +4989,22 @@ export default function InvoiceCreationPage() {
                                 <td className="border border-black px-2 py-2">
                                   <div>{claimNo}</div>
                                 </td>
-                                <td className="border border-black px-2 py-2">
-                                  {dutyCreditScrip !== "NA" 
-                                    ? (typeof dutyCreditScrip === 'string' && dutyCreditScrip.startsWith('D-') 
-                                        ? dutyCreditScrip 
-                                        : `D-${dutyCreditScrip}`)
-                                    : "NA"}
-                                </td>
-                                <td className="border border-black px-2 py-2">
-                                  {refundAmt !== "NA" 
-                                    ? (typeof refundAmt === 'string' && refundAmt.startsWith('R-') 
-                                        ? refundAmt 
-                                        : `R-${refundAmt}`)
-                                    : "NA"}
-                                </td>
+                                {dynamicCombinedFields.map((field, index) => (
+                                  <td key={index} className="border border-black px-2 py-2">
+                                    {field.combinedValue}
+                                  </td>
+                                ))}
+                                {dynamicAmountFields.map((field, index) => (
+                                  <td key={index} className="border border-black px-2 py-2">
+                                    {field.value !== "NA" 
+                                      ? (typeof field.value === 'string' && field.value.startsWith('R-') 
+                                          ? field.value 
+                                          : (typeof field.value === 'string' && field.value.startsWith('D-')
+                                              ? field.value
+                                              : field.value))
+                                      : "NA"}
+                                  </td>
+                                ))}
                                 <td className="border border-black px-2 py-2 text-right">{jobCharges.amount.toFixed(2)}</td>
                                 <td className="border border-black px-2 py-2 text-right">{caCharges.toFixed(2)}</td>
                                 <td className="border border-black px-2 py-2 text-right">{ceCharges.toFixed(2)}</td>
@@ -4626,7 +5037,7 @@ export default function InvoiceCreationPage() {
                             <tbody>
                               <tr>
                                 <td 
-                                  colSpan={3}
+                                  colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
                                   className="px-4 py-3 text-center font-bold text-black bg-white"
                                   style={{
                                     border: '1px solid #9ca3af',
