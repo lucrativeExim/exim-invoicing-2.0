@@ -1,5 +1,5 @@
 "use client";
-
+// Test
 import { useState, useEffect, useMemo, Fragment, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -1130,14 +1130,15 @@ export default function InvoiceCreationPage() {
   };
 
   // Update invoiceCalculation.amount from API response when available
+  // For Service_Reimbursement and Service billing types, preserve the calculated amount
   useEffect(() => {
-    if (invoiceBreakdown) {
+    if (invoiceBreakdown && billingType !== "Service_Reimbursement" && billingType !== "Service") {
       setInvoiceCalculation((prev) => ({
         ...prev,
         amount: (invoiceBreakdown.professionalCharges || 0).toFixed(2),
       }));
     }
-  }, [invoiceBreakdown]);
+  }, [invoiceBreakdown, billingType]);
 
 
   // Final amount - uses API response for sample invoice, client-side for partial invoice breakdown
@@ -3640,6 +3641,10 @@ export default function InvoiceCreationPage() {
                             parseFloat(calculations.applicationFees || 0) +
                             parseFloat(calculations.remiCharges || 0)
                           ).toFixed(2)
+                        : (billingType === "Service_Reimbursement" || billingType === "Service")
+                        ? (invoiceCalculation.amount 
+                            ? parseFloat(invoiceCalculation.amount).toFixed(2)
+                            : parseFloat(sampleInvoiceData.finalAmount || sampleInvoiceData.amount || 0).toFixed(2))
                         : parseFloat(
                             sampleInvoiceData.finalAmount ||
                               sampleInvoiceData.amount ||
@@ -4068,14 +4073,14 @@ export default function InvoiceCreationPage() {
               >
                 {/* Annexure Header */}
                 <div className="grid grid-cols-12 gap-4 mb-4">
-                  <div className="col-span-8">
-                    <div className="font-bold text-base">
+                  <div className="col-span-7">
+                    <div className="font-bold text-sm">
                       Annexure to Inv No. {sampleInvoiceData?.invoiceNo || "NA"} Date{" "}
                       {sampleInvoiceData?.date || "NA"}
                     </div>
                   </div>
-                  <div className="col-span-4 text-right">
-                    <div className="font-bold text-base">
+                  <div className="col-span-5 text-right">
+                    <div className="font-bold text-sm">
                       {sessionAccount?.account_name || "NA"}
                     </div>
                   </div>
@@ -4570,31 +4575,13 @@ export default function InvoiceCreationPage() {
                   };
 
                   // Get remi field descriptions from first job (for total row header)
+                  // Note: This will be updated later with allUsedRemiFieldsArray
                   let totalRemiDescriptions = ["R1", "R2", "R3", "R4", "R5"];
                   let totalDynamicAmountFieldsCount = 0;
                   let totalDynamicCombinedFieldsCount = 0;
                   if (selectedJobIds.length > 0) {
                     const firstJobId = selectedJobIds[0];
                     const firstJob = jobs.find((j) => j.id === firstJobId);
-                    const firstJobRemiFields = getRemiFieldsForJob(firstJobId);
-                    const remiFieldsArray = [
-                      { key: "R1", description: "R1", charges: 0 },
-                      { key: "R2", description: "R2", charges: 0 },
-                      { key: "R3", description: "R3", charges: 0 },
-                      { key: "R4", description: "R4", charges: 0 },
-                      { key: "R5", description: "R5", charges: 0 },
-                    ];
-                    firstJobRemiFields.forEach((rf) => {
-                      const index = parseInt(rf.key.replace('R', '')) - 1;
-                      if (index >= 0 && index < 5) {
-                        remiFieldsArray[index] = {
-                          key: rf.key,
-                          description: rf.description,
-                          charges: rf.charges,
-                        };
-                      }
-                    });
-                    totalRemiDescriptions = remiFieldsArray.map(rf => rf.description);
                     
                     // Get dynamic amount fields count for first job (for total row colspan)
                     if (firstJob) {
@@ -4695,6 +4682,34 @@ export default function InvoiceCreationPage() {
                       }
                     });
                   });
+
+                  // Collect all REMI fields that are used by ANY selected job
+                  // This will be used to determine which REMI columns to show in the header
+                  const allUsedRemiFieldsMap = new Map(); // key -> { key, description, charges }
+                  selectedJobIds.forEach((jobId) => {
+                    const jobRemiFields = getRemiFieldsForJob(jobId);
+                    jobRemiFields.forEach((rf) => {
+                      // Only add if not already present (use first job's description for each key)
+                      if (!allUsedRemiFieldsMap.has(rf.key)) {
+                        allUsedRemiFieldsMap.set(rf.key, {
+                          key: rf.key,
+                          description: rf.description,
+                          charges: 0, // Will be calculated per job
+                        });
+                      }
+                    });
+                  });
+                  
+                  // Convert map to array sorted by key (R1, R2, R3, R4, R5)
+                  const allUsedRemiFieldsArray = Array.from(allUsedRemiFieldsMap.values())
+                    .sort((a, b) => {
+                      const aNum = parseInt(a.key.replace('R', ''));
+                      const bNum = parseInt(b.key.replace('R', ''));
+                      return aNum - bNum;
+                    });
+                  
+                  // Update totalRemiDescriptions to use the filtered list
+                  totalRemiDescriptions = allUsedRemiFieldsArray.map(rf => rf.description);
 
                   return (
                     <>
@@ -4910,23 +4925,29 @@ export default function InvoiceCreationPage() {
                     // Get remi fields for this job
                     const jobRemiFields = getRemiFieldsForJob(jobId);
                     
-                    // Create an array of remi fields in order (R1-R5), ensuring we always have 5 entries
-                    const remiFieldsArray = [
-                      { key: "R1", description: "R1", charges: 0 },
-                      { key: "R2", description: "R2", charges: 0 },
-                      { key: "R3", description: "R3", charges: 0 },
-                      { key: "R4", description: "R4", charges: 0 },
-                      { key: "R5", description: "R5", charges: 0 },
-                    ];
-                    
-                    // Map the actual remi fields to their positions
+                    // Create a map of job's remi fields by key for quick lookup
+                    const jobRemiFieldsMap = new Map();
                     jobRemiFields.forEach((rf) => {
-                      const index = parseInt(rf.key.replace('R', '')) - 1;
-                      if (index >= 0 && index < 5) {
-                        remiFieldsArray[index] = {
-                          key: rf.key,
-                          description: rf.description,
-                          charges: rf.charges,
+                      jobRemiFieldsMap.set(rf.key, rf);
+                    });
+                    
+                    // Create remi fields array based on allUsedRemiFieldsArray
+                    // Only include fields that are used by at least one job
+                    const remiFieldsArray = allUsedRemiFieldsArray.map((usedField) => {
+                      // Check if this job has this remi field
+                      const jobRemiField = jobRemiFieldsMap.get(usedField.key);
+                      if (jobRemiField) {
+                        return {
+                          key: jobRemiField.key,
+                          description: jobRemiField.description,
+                          charges: jobRemiField.charges,
+                        };
+                      } else {
+                        // Job doesn't have this field, show 0
+                        return {
+                          key: usedField.key,
+                          description: usedField.description,
+                          charges: 0,
                         };
                       }
                     });
@@ -4937,48 +4958,85 @@ export default function InvoiceCreationPage() {
                     return (
                       <div key={jobId} className={`mb-8 ${sectionIndex > 0 ? 'print:page-break-before-always' : ''}`}>
                         {/* Administrative Information Section */}
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                          {/* Left Column */}
-                          <div className="text-xs">
-                            <div>Job No: {jobNo}</div>
-                            <div>Application Date: {applicationDate}</div>
-                            <div>Authorisation Date: {authorisationDate}</div>
-                            <div>File No: {fileNo}</div>
-                          </div>
-                          {/* Right Column */}
-                          <div className="text-xs">
-                            <div>Application No: {applicationNo}</div>
-                            <div>Authorisation No: {authorisationNo}</div>
-                            <div>Port: {port}</div>
-                            <div>File Date: {fileDate}</div>
-                            <div>Quantity: {quantity}</div>
-                            <div>DOQ: {doq}</div>
+                        <div className="mb-4">
+                          <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
+                            {/* Left Column - First 5 fields */}
+                            <div className="space-y-1">
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Sr No:</span>
+                                <span>{sectionIndex + 1}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Job No:</span>
+                                <span>{jobNo || 'NA'}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Application Ref No:</span>
+                                <span>{applicationNo || 'NA'}</span>
+                              </div>
+                              {/* <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Authorisation Date:</span>
+                                <span>{authorisationDate || 'NA'}</span>
+                              </div> */}
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">File No:</span>
+                                <span>{fileNo || 'NA'}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Quantity:</span>
+                                <span>{quantity || 'NA'}</span>
+                              </div>
+                            </div>
+                            {/* Right Column - Last 5 fields */}
+                            <div className="space-y-1">
+                              
+                              {/* <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Authorisation No:</span>
+                                <span>{authorisationNo || 'NA'}</span>
+                              </div> */}
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Port:</span>
+                                <span>{port || 'NA'}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Application Date:</span>
+                                <span>{applicationDate || 'NA'}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">File Date:</span>
+                                <span>{fileDate || 'NA'}</span>
+                              </div>
+                              <div className="flex items-center">
+                                <span className="font-medium min-w-[130px]">Qty UOM:</span>
+                                <span>{doq || 'NA'}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
                         {/* Table Section */}
-                        <div className="overflow-x-auto mb-4">
-                          <table className="w-full border-collapse border border-black text-xs">
+                        <div className="invoice-table-container mb-4 max-w-[210mm] mx-auto" style={{ width: '100%', maxWidth: '210mm' }}>
+                          <table className="w-full border-collapse border border-black text-[10px] print:text-[9px]" style={{ tableLayout: 'auto', width: '100%' }}>
                             <thead>
                               <tr className="bg-white text-black">
-                                <th className="border border-black px-2 py-2 text-left font-bold">Claim No</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold align-top">Claim No</th>
                                 {dynamicCombinedFields.map((field, index) => (
-                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                  <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
                                     {field.header}
                                   </th>
                                 ))}
                                 {dynamicAmountFields.map((field, index) => (
-                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                  <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
                                     {field.name}
                                   </th>
                                 ))}
-                                <th className="border border-black px-2 py-2 text-left font-bold">Charges</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">CA Charges</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">CE Charges</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">Regi/Oth</th>
-                                <th className="border border-black px-2 py-2 text-left font-bold">App Fee</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Charges</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CA Charges</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CE Charges</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Regi/Oth</th>
+                                <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Appl Fee</th>
                                 {remiFieldsArray.map((remiField, index) => (
-                                  <th key={index} className="border border-black px-2 py-2 text-left font-bold">
+                                  <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
                                     {remiField.description}
                                   </th>
                                 ))}
@@ -4986,32 +5044,34 @@ export default function InvoiceCreationPage() {
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="border border-black px-2 py-2">
-                                  <div>{claimNo}</div>
+                                <td className="border border-black px-1 py-1.5 align-top">
+                                  {claimNo}
                                 </td>
                                 {dynamicCombinedFields.map((field, index) => (
-                                  <td key={index} className="border border-black px-2 py-2">
+                                  <td key={index} className="border border-black px-1 py-1.5 align-top">
                                     {field.combinedValue}
                                   </td>
                                 ))}
                                 {dynamicAmountFields.map((field, index) => (
-                                  <td key={index} className="border border-black px-2 py-2">
+                                  <td key={index} className="border border-black px-1 py-1.5 align-top">
                                     {field.value !== "NA" 
                                       ? (typeof field.value === 'string' && field.value.startsWith('R-') 
                                           ? field.value 
                                           : (typeof field.value === 'string' && field.value.startsWith('D-')
                                               ? field.value
-                                              : field.value))
+                                              : (typeof field.value === 'number' || !isNaN(parseFloat(field.value)))
+                                                ? parseFloat(field.value).toFixed(2)
+                                                : field.value))
                                       : "NA"}
                                   </td>
                                 ))}
-                                <td className="border border-black px-2 py-2 text-right">{jobCharges.amount.toFixed(2)}</td>
-                                <td className="border border-black px-2 py-2 text-right">{caCharges.toFixed(2)}</td>
-                                <td className="border border-black px-2 py-2 text-right">{ceCharges.toFixed(2)}</td>
-                                <td className="border border-black px-2 py-2 text-right">{regiOther.toFixed(2)}</td>
-                                <td className="border border-black px-2 py-2 text-right">{applFeeValue.toFixed(2)}</td>
+                                <td className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">{jobCharges.amount.toFixed(2)}</td>
+                                <td className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">{caCharges.toFixed(2)}</td>
+                                <td className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">{ceCharges.toFixed(2)}</td>
+                                <td className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">{regiOther.toFixed(2)}</td>
+                                <td className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">{applFeeValue.toFixed(2)}</td>
                                 {remiFieldsArray.map((remiField, index) => (
-                                  <td key={index} className="border border-black px-2 py-2 text-right">
+                                  <td key={index} className="border border-black px-1 py-1.5 text-right whitespace-nowrap align-top">
                                     {remiField.charges.toFixed(2)}
                                   </td>
                                 ))}
@@ -5032,79 +5092,76 @@ export default function InvoiceCreationPage() {
                       
                       {/* Total Row Section */}
                       <div className="mt-8">
-                        <div className="overflow-x-auto">
-                          <table className="w-full border-collapse text-xs">
+                        <div className="invoice-table-container max-w-[210mm] mx-auto" style={{ width: '100%', maxWidth: '210mm' }}>
+                          <table className="w-full border-collapse border border-black text-[10px] print:text-[9px]" style={{ tableLayout: 'auto', width: '100%' }}>
+                            <thead>
+                              <tr>
+                                <th 
+                                  colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
+                                  className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top"
+                                >
+                                  {/* Empty header for label column */}
+                                </th>
+                                <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
+                                  Charges
+                                </th>
+                                <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
+                                  CA Charges
+                                </th>
+                                <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
+                                  CE Charges
+                                </th>
+                                <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
+                                  Regi/Oth
+                                </th>
+                                <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
+                                  App Fee
+                                </th>
+                                {allUsedRemiFieldsArray.map((usedField, index) => (
+                                  <th 
+                                    key={index}
+                                    className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black align-top"
+                                  >
+                                    {usedField.description}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
                             <tbody>
                               <tr>
                                 <td 
                                   colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
-                                  className="px-4 py-3 text-center font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderRight: '1px solid #9ca3af',
-                                    borderRadius: '8px 0 0 8px',
-                                  }}
+                                  className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top"
                                 >
                                   TOTAL
                                 </td>
-                                <td 
-                                  className="px-2 py-3 text-right font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderLeft: 'none',
-                                  }}
-                                >
+                                <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                                   {totals.charges.toFixed(2)}
                                 </td>
-                                <td 
-                                  className="px-2 py-3 text-right font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderLeft: 'none',
-                                  }}
-                                >
+                                <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                                   {totals.caCharges.toFixed(2)}
                                 </td>
-                                <td 
-                                  className="px-2 py-3 text-right font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderLeft: 'none',
-                                  }}
-                                >
+                                <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                                   {totals.ceCharges.toFixed(2)}
                                 </td>
-                                <td 
-                                  className="px-2 py-3 text-right font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderLeft: 'none',
-                                  }}
-                                >
+                                <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                                   {totals.regiOther.toFixed(2)}
                                 </td>
-                                <td 
-                                  className="px-2 py-3 text-right font-bold text-black bg-white"
-                                  style={{
-                                    border: '1px solid #9ca3af',
-                                    borderLeft: 'none',
-                                  }}
-                                >
+                                <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                                   {totals.applFee.toFixed(2)}
                                 </td>
-                                {totals.remiFields.map((remiTotal, index) => (
+                                {allUsedRemiFieldsArray.map((usedField, index) => {
+                                  // Get the total for this REMI field by finding its index
+                                  const remiIndex = parseInt(usedField.key.replace('R', '')) - 1;
+                                  const remiTotal = (remiIndex >= 0 && remiIndex < 5) ? totals.remiFields[remiIndex] : 0;
+                                  return (
                                   <td 
                                     key={index}
-                                    className="px-2 py-3 text-right font-bold text-black bg-white"
-                                    style={{
-                                      border: '1px solid #9ca3af',
-                                      borderLeft: 'none',
-                                      ...(index === totals.remiFields.length - 1 ? { borderRadius: '0 8px 8px 0' } : {}),
-                                    }}
+                                    className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top"
                                   >
                                     {remiTotal.toFixed(2)}
                                   </td>
-                                ))}
+                                )})}
                               </tr>
                             </tbody>
                           </table>
@@ -5119,6 +5176,35 @@ export default function InvoiceCreationPage() {
 
           {/* Print Styles */}
           <style jsx global>{`
+            /* Screen view - A4 width constraint */
+            @media screen {
+              .invoice-table-container {
+                max-width: 210mm !important;
+                width: 100% !important;
+                margin: 0 auto !important;
+                overflow-x: hidden !important;
+              }
+              .invoice-table-container table {
+                max-width: 100% !important;
+                width: 100% !important;
+                table-layout: auto !important;
+              }
+              .invoice-table-container th,
+              .invoice-table-container td {
+                word-wrap: break-word !important;
+                word-break: break-word !important;
+                overflow-wrap: break-word !important;
+                white-space: normal !important;
+                height: auto !important;
+                min-height: 2em !important;
+                vertical-align: top !important;
+                line-height: 1.4 !important;
+              }
+              .invoice-table-container th.whitespace-nowrap,
+              .invoice-table-container td.whitespace-nowrap {
+                white-space: nowrap !important;
+              }
+            }
             @media print {
               @page {
                 size: A4;
@@ -5143,6 +5229,24 @@ export default function InvoiceCreationPage() {
               }
               *::-webkit-scrollbar {
                 display: none !important;
+              }
+              table {
+                max-width: 100% !important;
+                width: 100% !important;
+                table-layout: auto !important;
+              }
+              th, td {
+                word-wrap: break-word !important;
+                word-break: break-word !important;
+                overflow-wrap: break-word !important;
+                white-space: normal !important;
+                height: auto !important;
+                min-height: 2em !important;
+                vertical-align: top !important;
+                line-height: 1.4 !important;
+              }
+              th.whitespace-nowrap, td.whitespace-nowrap {
+                white-space: nowrap !important;
               }
               .print\\:hidden {
                 display: none !important;
