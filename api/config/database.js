@@ -5,8 +5,8 @@ const prisma = require('../lib/prisma');
 // Database stores dates in UTC, application uses IST for display
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'exim_user',
-  password: process.env.DB_PASSWORD || 'your_secure_password_here',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'leo_munimji',
   waitForConnections: true,
   connectionLimit: 10,
