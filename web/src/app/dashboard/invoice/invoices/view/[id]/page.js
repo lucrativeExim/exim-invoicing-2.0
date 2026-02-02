@@ -8,6 +8,8 @@ import { useAccount } from "@/context/AccountContext";
 import logoImage from "@/assets/images/invoice-logo.png";
 import Modal from "@/components/Modal";
 import { Button } from "@/components/formComponents";
+import AnnexureTable from "@/components/AnnexureTable";
+import { calculateServiceSubtotal as calculateServiceSubtotalUtil } from "@/utils/invoiceUtils";
 
 // Helper function to convert field name to database column name
 const getFieldKey = (fieldName) => {
@@ -490,29 +492,42 @@ export default function InvoiceViewPage() {
     );
   }, [invoice]);
 
-  // Get remi fields from job service charges (for Full_Invoice + Draft) or from invoice table (for Partial_Invoice + Draft and Proforma)
+  // Get remi fields - charges come from API response (invoice table), descriptions from job service charges
   const remiFields = useMemo(() => {
     if (!invoice) return [];
     
-    const invoiceStageStatus = invoice.invoice_stage_status;
-    const isDraft = invoiceStageStatus === "Draft";
+    // Get charges from API response (invoice table)
+    const remiFieldsArray = [];
+    const remiFieldsConfig = [
+      { desc: 'remi_one_desc', charges: 'remi_one_charges' },
+      { desc: 'remi_two_desc', charges: 'remi_two_charges' },
+      { desc: 'remi_three_desc', charges: 'remi_three_charges' },
+      { desc: 'remi_four_desc', charges: 'remi_four_charges' },
+      { desc: 'remi_five_desc', charges: 'remi_five_charges' },
+    ];
     
-    // For Partial_Invoice + Draft, use invoice table data directly
-    if (isPartialInvoiceDraft) {
-      const remiFieldsArray = [];
-      const remiFieldsConfig = [
-        { charges: 'remi_one_charges' },
-        { charges: 'remi_two_charges' },
-        { charges: 'remi_three_charges' },
-        { charges: 'remi_four_charges' },
-        { charges: 'remi_five_charges' },
-      ];
+    // Get job service charge for description mapping
+    let jobServiceCharge = null;
+    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
+      if (firstJobId) {
+        jobServiceCharge = jobServiceChargesMap[firstJobId];
+      }
+    }
+    
+    remiFieldsConfig.forEach((field) => {
+      // Get charges from API response (invoice table) - these come as strings
+      const chargesValue = invoice[field.charges];
+      const charges = parseFloat(chargesValue || 0);
       
-      remiFieldsConfig.forEach((field) => {
-        const charges = parseFloat(invoice[field.charges] || 0);
-        if (charges > 0) {
-          // For Partial_Invoice, we use generic description or can be stored in invoice table
-          // For now, using generic descriptions
+      // Only include fields where charges > 0
+      if (charges > 0) {
+        // Get description from job service charges, fallback to generic description
+        let description = null;
+        if (jobServiceCharge && jobServiceCharge[field.desc] && jobServiceCharge[field.desc].trim() !== '') {
+          description = jobServiceCharge[field.desc].trim();
+        } else {
+          // Use generic descriptions as fallback
           const descriptions = [
             'Reimbursement One',
             'Reimbursement Two',
@@ -521,96 +536,18 @@ export default function InvoiceViewPage() {
             'Reimbursement Five',
           ];
           const index = remiFieldsConfig.indexOf(field);
-          remiFieldsArray.push({
-            description: descriptions[index] || `Reimbursement ${index + 1}`,
-            charges: charges,
-          });
+          description = descriptions[index] || `Reimbursement ${index + 1}`;
         }
-      });
-      
-      return remiFieldsArray;
-    }
-    
-    // For Proforma (non-Draft) invoices, get amounts from invoice table and descriptions from job service charges
-    if (!isDraft && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
-      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
-      if (!firstJobId) return [];
-      
-      const jobServiceCharge = jobServiceChargesMap[firstJobId];
-      const remiFieldsArray = [];
-      const remiFieldsConfig = [
-        { desc: 'remi_one_desc', charges: 'remi_one_charges' },
-        { desc: 'remi_two_desc', charges: 'remi_two_charges' },
-        { desc: 'remi_three_desc', charges: 'remi_three_charges' },
-        { desc: 'remi_four_desc', charges: 'remi_four_charges' },
-        { desc: 'remi_five_desc', charges: 'remi_five_charges' },
-      ];
-      
-      remiFieldsConfig.forEach((field) => {
-        // Get amount from invoice table
-        const charges = parseFloat(invoice[field.charges] || 0);
-        if (charges > 0) {
-          // Try to get description from job service charges, otherwise use generic description
-          let description = null;
-          if (jobServiceCharge && jobServiceCharge[field.desc] && jobServiceCharge[field.desc].trim() !== '') {
-            description = jobServiceCharge[field.desc];
-          } else {
-            // Use generic descriptions as fallback
-            const descriptions = [
-              'Reimbursement One',
-              'Reimbursement Two',
-              'Reimbursement Three',
-              'Reimbursement Four',
-              'Reimbursement Five',
-            ];
-            const index = remiFieldsConfig.indexOf(field);
-            description = descriptions[index] || `Reimbursement ${index + 1}`;
-          }
-          
-          remiFieldsArray.push({
-            description: description,
-            charges: charges,
-          });
-        }
-      });
-      
-      return remiFieldsArray;
-    }
-    
-    // For Full_Invoice + Draft, get from job service charges
-    if (isFullInvoiceDraft && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
-      const firstJobId = invoice.invoiceSelectedJobs[0].job?.id;
-      if (!firstJobId) return [];
-      
-      const jobServiceCharge = jobServiceChargesMap[firstJobId];
-      if (!jobServiceCharge) return [];
-      
-      const remiFieldsArray = [];
-      const remiFieldsConfig = [
-        { desc: 'remi_one_desc', charges: 'remi_one_charges' },
-        { desc: 'remi_two_desc', charges: 'remi_two_charges' },
-        { desc: 'remi_three_desc', charges: 'remi_three_charges' },
-        { desc: 'remi_four_desc', charges: 'remi_four_charges' },
-        { desc: 'remi_five_desc', charges: 'remi_five_charges' },
-      ];
-      
-      remiFieldsConfig.forEach((field) => {
-        const description = jobServiceCharge[field.desc];
-        const charges = jobServiceCharge[field.charges];
         
-        if (description && description.trim() !== '') {
-          remiFieldsArray.push({
-            description: description,
-            charges: parseFloat(charges || 0),
-          });
-        }
-      });
-      
-      return remiFieldsArray;
-    }
+        remiFieldsArray.push({
+          description: description,
+          charges: charges,
+        });
+      }
+    });
     
-    return [];
-  }, [invoice, jobServiceChargesMap, isPartialInvoiceDraft, isFullInvoiceDraft]);
+    return remiFieldsArray;
+  }, [invoice, jobServiceChargesMap]);
 
   // Get GST rates from job register
   const gstRates = useMemo(() => {
@@ -759,7 +696,16 @@ export default function InvoiceViewPage() {
       applicationFees = 0;
     }
     
-    const subtotal = baseAmount + registrationCharges + caCharges + ceCharges + rewardAmount - discountAmount;
+    // Use common utility function to calculate subtotal (matches invoice creation page)
+    const subtotal = calculateServiceSubtotalUtil({
+      invoiceData: invoice,
+      baseAmount,
+      registrationCharges,
+      caCharges,
+      ceCharges,
+      rewardAmount,
+      discountAmount,
+    });
     
     const baseCgstRate = gstRates.cgstRate || 0;
     const baseSgstRate = gstRates.sgstRate || 0;
@@ -887,6 +833,17 @@ export default function InvoiceViewPage() {
     if (!invoice) return "Invoice";
     return invoice.invoice_stage_status === "Draft" ? "Draft Invoice" : "Proforma Invoice";
   }, [invoice]);
+
+  // Calculate invoice amount wrapper function for AnnexureTable component
+  // This matches the signature expected by AnnexureTable
+  const calculateInvoiceAmount = (job, serviceCharge) => {
+    if (!job || !serviceCharge) {
+      return { amount: 0 };
+    }
+    // Use the existing calculateProfessionalCharges function
+    const amount = calculateProfessionalCharges(serviceCharge, job.id, jobFieldValuesMap);
+    return { amount: parseFloat(amount.toFixed(2)) };
+  };
 
   // Handle PO No modal open
   const handleOpenPOModal = () => {
@@ -1620,6 +1577,22 @@ export default function InvoiceViewPage() {
           </div>
         </div>
       </div>
+
+      {/* Annexure Table - Show when invoice has more than 1 job */}
+      {invoice && invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 1 && (
+        <AnnexureTable
+          invoiceNo={invoiceNumber}
+          invoiceDate={invoiceDate}
+          accountName={displayAccount?.account_name || sessionAccount?.account_name || "NA"}
+          selectedJobIds={invoice.invoiceSelectedJobs.map((invoiceJob) => invoiceJob.job?.id).filter(Boolean)}
+          jobs={invoice.invoiceSelectedJobs.map((invoiceJob) => invoiceJob.job).filter(Boolean)}
+          jobServiceChargesMap={jobServiceChargesMap}
+          jobFieldValuesMap={jobFieldValuesMap}
+          getFieldValueFromJobFieldValue={getFieldValueFromJobFieldValue}
+          calculateInvoiceAmount={calculateInvoiceAmount}
+          billingFieldNames={billingFieldNames}
+        />
+      )}
 
       {/* PO No Modal */}
       <Modal
