@@ -878,11 +878,11 @@ export default function AnnexureTable({
               <div className="mb-4">
                 <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
                   <div className="flex items-center">
-                    <span className="font-bold min-w-[130px]">Sr No :</span>
+                    <span className="font-bold min-w-[150px]">Sr No :</span>
                     <span className="font-bold">{sectionIndex + 1}</span>
                   </div>
                   <div className="flex items-center">
-                    <span className="font-bold min-w-[130px]">Job No :</span>
+                    <span className="font-bold min-w-[150px]">Job No :</span>
                     <span className="font-bold">{jobNo || 'NA'}</span>
                   </div>
                 </div>
@@ -900,7 +900,7 @@ export default function AnnexureTable({
                         ) || "NA";
                         return (
                           <div key={index} className="flex items-center">
-                            <span className=" min-w-[130px]">{fieldName} :</span>
+                            <span className=" min-w-[150px]">{fieldName} : </span>
                             <span>{fieldValue}</span>
                           </div>
                         );
@@ -1061,6 +1061,20 @@ export default function AnnexureTable({
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* Footer Section */}
+        <div className="text-right mt-5 mb-5">
+          <span className="font-semibold text-sm">For {accountName || "NA"}</span>
+        </div>
+        <div className="px-3 mb-2">
+          <div className="text-center mt-5">
+            <span className="text-xs">
+              Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
+              Ph:+91 20 3511 3202, Website: www.lucrative.co.in As Per Rule 46(q) of GST act
+              2017 said Invoice is digitally signed
+            </span>
           </div>
         </div>
       </div>

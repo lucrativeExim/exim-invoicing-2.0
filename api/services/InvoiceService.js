@@ -42,45 +42,117 @@ class InvoiceService {
   /**
    * Calculate professional charges for a job
    * Based on job service charge: min, max, in_percentage, fixed, per_shb
+   * Matches the client-side calculation logic with 12 different formulas
    */
   static calculateProfessionalCharges(job, jobServiceCharge, jobFieldValues) {
-    if (!jobServiceCharge) {
+    if (!job || !jobServiceCharge) {
       return 0;
     }
 
+    // Fetch claim_amount_after_finalization from JobFieldValues table
+    const claimAmountValue =
+      this.getFieldValueFromJobFieldValue(
+        jobFieldValues,
+        'claim_amount_after_finalization'
+      ) ||
+      this.getFieldValueFromJobFieldValue(
+        jobFieldValues,
+        'Claim Amount after Finalization'
+      );
+    const claimAmount = parseFloat(claimAmountValue || 0);
+
+    // Fetch quantity from JobFieldValues table
+    const quantityValue =
+      this.getFieldValueFromJobFieldValue(jobFieldValues, 'quantity') ||
+      this.getFieldValueFromJobFieldValue(jobFieldValues, 'Quantity');
+    const quantity = parseFloat(quantityValue || job.quantity || 0);
+
+    const fixed = parseFloat(jobServiceCharge.fixed || 0);
+    const inPercentage = parseFloat(jobServiceCharge.in_percentage || 0);
     const min = parseFloat(jobServiceCharge.min || 0);
     const max = parseFloat(jobServiceCharge.max || 0);
-    const inPercentage = parseFloat(jobServiceCharge.in_percentage || 0);
-    const fixed = parseFloat(jobServiceCharge.fixed || 0);
     const perShb = parseFloat(jobServiceCharge.per_shb || 0);
+    const percentagePerShb = jobServiceCharge.percentage_per_shb === 'Yes';
+    const fixedPercentagePerShb = jobServiceCharge.fixed_percentage_per_shb === 'Yes';
 
-    // Get per_shb value from JobFieldValue (try multiple field name variations)
-    const perShbValue = this.getFieldValueFromJobFieldValue(
-      jobFieldValues,
-      'per_shb'
-    ) || this.getFieldValueFromJobFieldValue(jobFieldValues, 'Per SHB') || '0';
-    const perShbNum = parseFloat(perShbValue) || 0;
+    // Calculate percentage amount (based on claim_amount_after_finalization)
+    const percentageAmount = (claimAmount * inPercentage) / 100;
 
-    let professionalCharges = 0;
+    // Calculate per unit amount (quantity * per_shb from service charge)
+    const perUnitAmount = quantity * perShb;
 
-    // Calculate based on in_percentage if available
-    if (inPercentage > 0 && perShbNum > 0) {
-      professionalCharges = (perShbNum * inPercentage) / 100;
-    } else if (fixed > 0) {
-      professionalCharges = fixed;
-    } else if (perShb > 0 && perShbNum > 0) {
-      professionalCharges = perShb * perShbNum;
+    let calculatedAmount = 0;
+
+    // Determine which formula to use based on available fields
+    const hasFixed = fixed > 0;
+    const hasPercentage = inPercentage > 0;
+    const hasMin = min > 0;
+    const hasMax = max > 0;
+    const hasPerShb = perShb > 0;
+
+    // Formula 1: Fixed Only
+    if (hasFixed && !hasPercentage && !hasMin && !hasMax && !hasPerShb) {
+      calculatedAmount = fixed;
+    }
+    // Formula 2: Percent Only
+    else if (!hasFixed && hasPercentage && !hasMin && !hasMax && !hasPerShb) {
+      calculatedAmount = percentageAmount;
+    }
+    // Formula 3: Minimum or Percentage (whichever is higher)
+    else if (!hasFixed && hasPercentage && hasMin && !hasMax && !hasPerShb) {
+      calculatedAmount = Math.max(percentageAmount, min);
+    }
+    // Formula 4: Percentage or Maximum (whichever is lower)
+    else if (!hasFixed && hasPercentage && !hasMin && hasMax && !hasPerShb) {
+      calculatedAmount = Math.min(percentageAmount, max);
+    }
+    // Formula 5: Percentage or min but not more than max
+    else if (!hasFixed && hasPercentage && hasMin && hasMax && !hasPerShb) {
+      calculatedAmount = Math.max(min, Math.min(percentageAmount, max));
+    }
+    // Formula 6: Per Unit Pricing
+    else if (!hasFixed && !hasPercentage && !hasMin && !hasMax && hasPerShb) {
+      calculatedAmount = perUnitAmount;
+    }
+    // Formula 7: Fixed + Percentage
+    else if (hasFixed && hasPercentage && !hasMin && !hasMax && !hasPerShb) {
+      calculatedAmount = fixed + percentageAmount;
+    }
+    // Formula 8: Fixed + (Percentage or Minimum whichever is higher)
+    else if (hasFixed && hasPercentage && hasMin && !hasMax && !hasPerShb) {
+      calculatedAmount = fixed + Math.max(percentageAmount, min);
+    }
+    // Formula 9: Fixed + (Percentage or Maximum whichever is lower)
+    else if (hasFixed && hasPercentage && !hasMin && hasMax && !hasPerShb) {
+      calculatedAmount = fixed + Math.min(percentageAmount, max);
+    }
+    // Formula 10: Fixed + Percentage (within Min-Max range)
+    else if (hasFixed && hasPercentage && hasMin && hasMax && !hasPerShb) {
+      const boundedPercentage = Math.max(min, Math.min(percentageAmount, max));
+      calculatedAmount = fixed + boundedPercentage;
+    }
+    // Formula 11: Percentage OR Per Unit (whichever is higher) OR (if percentage_per_shb = Yes: Percentage + Per Unit)
+    else if (!hasFixed && hasPercentage && !hasMin && !hasMax && hasPerShb) {
+      if (percentagePerShb) {
+        calculatedAmount = percentageAmount + perUnitAmount;
+      } else {
+        calculatedAmount = Math.max(percentageAmount, perUnitAmount);
+      }
+    }
+    // Formula 12: Fixed + (Percentage OR Per Unit whichever is higher) OR (if fixed_percentage_per_shb = Yes: Fixed + Percentage + Per Unit)
+    else if (hasFixed && hasPercentage && !hasMin && !hasMax && hasPerShb) {
+      if (fixedPercentagePerShb) {
+        calculatedAmount = fixed + percentageAmount + perUnitAmount;
+      } else {
+        calculatedAmount = fixed + Math.max(percentageAmount, perUnitAmount);
+      }
+    }
+    // Default: Use fixed if available, otherwise 0
+    else {
+      calculatedAmount = hasFixed ? fixed : 0;
     }
 
-    // Apply min/max constraints
-    if (min > 0 && professionalCharges < min) {
-      professionalCharges = min;
-    }
-    if (max > 0 && professionalCharges > max) {
-      professionalCharges = max;
-    }
-
-    return professionalCharges;
+    return parseFloat(calculatedAmount.toFixed(2));
   }
 
   /**
@@ -235,8 +307,7 @@ class InvoiceService {
    * - 'EXEMPTED': Set all GST amounts to 0
    */
   static calculateGst(subtotal, gstRate, gstType = null) {
-    console.log("gstRate", gstRate);
-    console.log("gstType", gstType);
+
     
     if (!gstRate) {
       return {
@@ -377,6 +448,7 @@ class InvoiceService {
         jobServiceCharge,
         jobFieldValues
       );
+      
 
       // Calculate registration charges
       totalRegistrationCharges += this.calculateRegistrationCharges(jobServiceCharge);
@@ -429,7 +501,7 @@ class InvoiceService {
 
     // Calculate base amount (professional charges)
     const baseAmount = totalProfessionalCharges;
-
+    
     // Calculate service subtotal (base + registration + CA + CE + reward - discount)
     const serviceSubtotal =
       baseAmount +
@@ -452,14 +524,22 @@ class InvoiceService {
     // Calculate final amounts based on billing type
     let finalAmount = 0;
     let payAmount = 0;
-
+console.log("billingType", billingType);
     if (billingType === 'Service') {
+      console.log("condition 1");
       finalAmount = serviceSubtotal + gst.cgstAmount + gst.sgstAmount + gst.igstAmount;
       payAmount = finalAmount;
     } else if (billingType === 'Reimbursement') {
+      console.log("condition 2");
       finalAmount = reimbursementSubtotal;
       payAmount = finalAmount;
-    } else if (billingType === 'Service & Reimbursement') {
+    } else if (billingType === 'Service_Reimbursement') {
+      console.log("condition 3");
+      console.log("serviceSubtotal", serviceSubtotal);
+      console.log("reimbursementSubtotal", reimbursementSubtotal);
+      console.log("gst.cgstAmount", gst.cgstAmount);
+      console.log("gst.sgstAmount", gst.sgstAmount);
+      console.log("gst.igstAmount", gst.igstAmount);
       finalAmount =
         serviceSubtotal +
         reimbursementSubtotal +
@@ -468,6 +548,109 @@ class InvoiceService {
         gst.igstAmount;
       payAmount = finalAmount;
     }
+    console.log("finalAmount", finalAmount);
+
+    // Fetch job register for job code and SAC No
+    let jobRegister = null;
+    if (jobRegisterId) {
+      try {
+        jobRegister = await prisma.jobRegister.findUnique({
+          where: { id: jobRegisterId },
+          include: {
+            gstRate: true,
+          },
+        });
+      } catch (error) {
+        console.error('Error fetching job register:', error);
+      }
+    }
+
+    // Fetch billing field names from job register fields
+    let billingFieldNames = [];
+    if (jobRegisterId) {
+      try {
+        const jobRegisterField = await prisma.jobRegisterField.findFirst({
+          where: {
+            job_register_id: jobRegisterId,
+            status: 'Active',
+          },
+        });
+
+        if (jobRegisterField && jobRegisterField.form_fields_json) {
+          let fields = jobRegisterField.form_fields_json;
+          if (typeof fields === 'string') {
+            fields = JSON.parse(fields);
+          }
+          if (Array.isArray(fields)) {
+            billingFieldNames = fields
+              .filter((field) => field.billing === true)
+              .map((field) => field.name);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching billing field names:', error);
+      }
+    }
+
+    // Prepare jobs data for display (with all fields needed for AnnexureTable)
+    // Also calculate professional charges per job for AnnexureTable
+    const jobsData = [];
+    const jobServiceChargesMap = {};
+    const jobProfessionalChargesMap = {};
+
+    jobs.forEach((job) => {
+      const serviceCharge = job.jobServiceCharges?.[0];
+      const jobFieldValues = job.jobFieldValues || [];
+
+      // Calculate professional charges for this job
+      const professionalCharges = this.calculateProfessionalCharges(
+        job,
+        serviceCharge,
+        jobFieldValues
+      );
+      jobProfessionalChargesMap[job.id] = professionalCharges;
+
+      // Prepare job data
+      jobsData.push({
+        id: job.id,
+        job_no: job.job_no,
+        application_date: job.application_date,
+        sanction___approval_date: job.sanction___approval_date,
+        authorisation_no: job.authorisation_no,
+        claim_no: job.claim_no,
+        dbk_claim_date: job.dbk_claim_date,
+        no_of_cac: job.no_of_cac,
+        no_of_cec: job.no_of_cec,
+        jobFieldValues: jobFieldValues,
+      });
+
+      // Prepare job service charges map (for client info)
+      if (serviceCharge) {
+        jobServiceChargesMap[job.id] = {
+          client_name: serviceCharge.client_name,
+          client_address: serviceCharge.client_address,
+          gst_no: serviceCharge.gst_no,
+          concern_person: serviceCharge.concern_person,
+          concern_email_id: serviceCharge.concern_email_id,
+          group_id: serviceCharge.group_id,
+          invoice_description: serviceCharge.invoice_description,
+          registration_other_charges: serviceCharge.registration_other_charges,
+          ca_charges: serviceCharge.ca_charges,
+          ce_charges: serviceCharge.ce_charges,
+          application_fees: serviceCharge.application_fees,
+          remi_one_desc: serviceCharge.remi_one_desc,
+          remi_one_charges: serviceCharge.remi_one_charges,
+          remi_two_desc: serviceCharge.remi_two_desc,
+          remi_two_charges: serviceCharge.remi_two_charges,
+          remi_three_desc: serviceCharge.remi_three_desc,
+          remi_three_charges: serviceCharge.remi_three_charges,
+          remi_four_desc: serviceCharge.remi_four_desc,
+          remi_four_charges: serviceCharge.remi_four_charges,
+          remi_five_desc: serviceCharge.remi_five_desc,
+          remi_five_charges: serviceCharge.remi_five_charges,
+        };
+      }
+    });
 
     return {
       // Job info
@@ -512,6 +695,18 @@ class InvoiceService {
       // Final amounts
       finalAmount,
       payAmount,
+
+      // Additional data for display
+      jobs: jobsData,
+      jobServiceChargesMap,
+      jobProfessionalChargesMap, // Per-job professional charges for AnnexureTable
+      jobRegister: jobRegister ? {
+        job_code: jobRegister.job_code,
+        gstRate: jobRegister.gstRate ? {
+          sac_no: jobRegister.gstRate.sac_no,
+        } : null,
+      } : null,
+      billingFieldNames,
     };
   }
 }

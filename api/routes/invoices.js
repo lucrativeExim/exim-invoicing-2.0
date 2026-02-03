@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
 const InvoiceService = require('../services/InvoiceService');
+const PdfService = require('../services/PdfService');
 const { authenticate, requireRole } = require('../middleware/accessControl');
 const { convertBigIntToString } = require('../lib/jsonUtils');
 
@@ -89,16 +90,62 @@ router.get('/sample', requireRole(['Super_Admin', 'Admin']), async (req, res) =>
 router.get('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
-    // console.log(invoice);
     
     if (!invoice) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     
+    // Extract job IDs from invoice
+    const jobIds = invoice.invoiceSelectedJobs
+      ? invoice.invoiceSelectedJobs.map((invoiceJob) => invoiceJob.job?.id).filter(Boolean)
+      : [];
+    
+    if (jobIds.length === 0) {
+      // If no jobs, return invoice as-is
+      const serializedInvoice = convertBigIntToString(invoice);
+      return res.json(serializedInvoice);
+    }
+    
+    // Calculate invoice breakdown using InvoiceService (same as sample API)
+    // This ensures consistency between view and preview
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      jobIds,
+      invoice.billing_type,
+      parseFloat(invoice.reward_amount || 0),
+      parseFloat(invoice.discount_amount || 0)
+    );
+    
+    // Merge invoice data with breakdown data
+    // Include all fields from breakdown (jobs, jobServiceChargesMap, jobRegister, billingFieldNames)
+    const enhancedInvoice = {
+      ...invoice,
+      // Override calculated fields with breakdown (ensures consistency)
+      professionalCharges: breakdown.professionalCharges,
+      registrationCharges: breakdown.registrationCharges,
+      caCharges: breakdown.caCharges,
+      ceCharges: breakdown.ceCharges,
+      applicationFees: breakdown.applicationFees,
+      caCertCount: breakdown.caCertCount,
+      ceCertCount: breakdown.ceCertCount,
+      remiFields: breakdown.remiFields,
+      remiCharges: breakdown.remiCharges,
+      rewardAmount: breakdown.rewardAmount,
+      discountAmount: breakdown.discountAmount,
+      gst: breakdown.gst,
+      serviceSubtotal: breakdown.serviceSubtotal,
+      reimbursementSubtotal: breakdown.reimbursementSubtotal,
+      finalAmount: breakdown.finalAmount,
+      // Additional data for display (from breakdown)
+      jobs: breakdown.jobs,
+      jobServiceChargesMap: breakdown.jobServiceChargesMap,
+      jobProfessionalChargesMap: breakdown.jobProfessionalChargesMap,
+      jobRegister: breakdown.jobRegister || invoice.jobRegister, // Use breakdown if available, otherwise invoice
+      billingFieldNames: breakdown.billingFieldNames,
+    };
+    
     // Convert BigInt values to strings before serialization
-    const serializedInvoice = convertBigIntToString(invoice);
+    const serializedInvoice = convertBigIntToString(enhancedInvoice);
     res.json(serializedInvoice);
-    // console.log(serializedInvoice);
     
   } catch (error) {
     console.error('Error fetching invoice:', error);
@@ -308,6 +355,136 @@ router.delete('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) =>
   } catch (error) {
     console.error('Error deleting invoice:', error);
     res.status(500).json({ error: 'Failed to delete invoice' });
+  }
+});
+
+// Generate PDF for sample invoice (preview) - Only Super Admin and Admin can access
+router.get('/sample/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  try {
+    const { job_ids, billing_type, reward_amount, discount_amount, invoice_no, invoice_date, account_id } = req.query;
+
+    // Validate required fields
+    if (!job_ids) {
+      return res.status(400).json({ error: 'job_ids is required' });
+    }
+
+    if (!billing_type) {
+      return res.status(400).json({ error: 'billing_type is required' });
+    }
+
+    // Parse job_ids
+    const jobIdsArray = Array.isArray(job_ids)
+      ? job_ids
+      : typeof job_ids === 'string'
+      ? job_ids.split(',').map((id) => id.trim())
+      : [job_ids];
+
+    if (jobIdsArray.length === 0) {
+      return res.status(400).json({ error: 'At least one job ID is required' });
+    }
+
+    // Calculate invoice breakdown
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      jobIdsArray,
+      billing_type,
+      reward_amount || 0,
+      discount_amount || 0
+    );
+
+    // Get account data
+    let account = null;
+    const Account = require('../models/Account');
+    if (account_id) {
+      account = await Account.findById(account_id);
+    } else if (breakdown.accountId) {
+      // Try to get account from breakdown if account_id not provided
+      account = await Account.findById(breakdown.accountId);
+    }
+
+    // Generate PDF
+    const invoiceNo = invoice_no || "NA";
+    const invoiceDate = invoice_date || new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    
+    const pdfBuffer = await PdfService.generateInvoicePdf(
+      breakdown,
+      account,
+      invoiceNo,
+      invoiceDate,
+      jobIdsArray
+    );
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoiceNo}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to generate PDF',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
+// Generate PDF for saved invoice - Only Super Admin and Admin can access
+router.get('/:id/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id);
+    
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    
+    // Extract job IDs from invoice
+    const jobIds = invoice.invoiceSelectedJobs
+      ? invoice.invoiceSelectedJobs.map((invoiceJob) => invoiceJob.job?.id).filter(Boolean)
+      : [];
+    
+    // Calculate invoice breakdown
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      jobIds,
+      invoice.billing_type,
+      parseFloat(invoice.reward_amount || 0),
+      parseFloat(invoice.discount_amount || 0)
+    );
+
+    // Merge invoice data with breakdown
+    const enhancedInvoice = {
+      ...breakdown,
+      invoiceNo: invoice.invoice_no,
+      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-GB').replace(/\//g, '-') : "NA",
+      po_no: invoice.po_no,
+      irn_no: invoice.irn_no,
+      note: invoice.note,
+    };
+
+    // Get account data
+    const Account = require('../models/Account');
+    const account = await Account.findById(invoice.account_id);
+
+    // Generate PDF
+    const pdfBuffer = await PdfService.generateInvoicePdf(
+      enhancedInvoice,
+      account,
+      enhancedInvoice.invoiceNo,
+      enhancedInvoice.invoiceDate,
+      jobIds
+    );
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${enhancedInvoice.invoiceNo}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to generate PDF',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
   }
 });
 

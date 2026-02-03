@@ -655,39 +655,8 @@ export default function InvoiceCreationPage() {
   }, [selectedJobIds]);
 
 
-  // Function to fetch invoice breakdown from API
-  const fetchInvoiceBreakdown = async () => {
-    // Only fetch if we have selected jobs and billing type
-    if (selectedJobIds.length === 0 || !billingType) {
-      setInvoiceBreakdown(null);
-      return false;
-    }
-
-    try {
-      setInvoiceBreakdownLoading(true);
-
-      // Call the /invoices/sample API
-      // Note: InvoiceService expects billing_type as "Service", "Reimbursement", or "Service_Reimbursement"
-      const response = await api.get('/invoices/sample', {
-        params: {
-          job_ids: selectedJobIds.join(','),
-          billing_type: billingType,
-          reward_amount: invoiceCalculation.reward_amount || 0,
-          discount_amount: invoiceCalculation.discount_amount || 0,
-        },
-      });
-
-      setInvoiceBreakdown(response.data);
-      return true;
-    } catch (error) {
-      console.error('Error fetching invoice breakdown:', error);
-      setInvoiceBreakdown(null);
-      alert('Error fetching invoice breakdown. Please try again.');
-      return false;
-    } finally {
-      setInvoiceBreakdownLoading(false);
-    }
-  };
+  // Note: Invoice breakdown is now fetched in the preview page
+  // This function is kept for backward compatibility but redirects to preview
 
   // Handle invoice type change - update billing type based on invoice type
   const handleInvoiceTypeChange = (e) => {
@@ -840,7 +809,7 @@ export default function InvoiceCreationPage() {
     const hasMin = min > 0;
     const hasMax = max > 0;
     const hasPerShb = perShb > 0;
-
+    console.log("hasPerShb", hasPerShb);
     // Formula 1: Fixed Only
     if (hasFixed && !hasPercentage && !hasMin && !hasMax && !hasPerShb) {
       calculatedAmount = fixed;
@@ -867,6 +836,9 @@ export default function InvoiceCreationPage() {
     }
     // Formula 7: Fixed + Percentage
     else if (hasFixed && hasPercentage && !hasMin && !hasMax && !hasPerShb) {
+      console.log(
+        "formula 7", hasFixed, hasPercentage, hasMin, hasMax, hasPerShb
+      )
       calculatedAmount = fixed + percentageAmount;
     }
     // Formula 8: Fixed + (Percentage or Minimum whichever is higher)
@@ -1884,16 +1856,29 @@ export default function InvoiceCreationPage() {
     return `${day}-${month}-${year}`;
   }, []);
 
-  // Function to show sample invoice inline - fetches API data first
-  const handleShowSampleInvoice = async () => {
-    // Fetch invoice breakdown from API first
-    const success = await fetchInvoiceBreakdown();
-    
-    if (success) {
-      // Close the calculation modal and show sample invoice
-      setShowInvoiceModal(false);
-      setShowSampleInvoice(true);
+  // Function to redirect to preview page
+  const handleShowSampleInvoice = () => {
+    if (selectedJobIds.length === 0) {
+      alert("Please select at least one job");
+      return;
     }
+
+    if (!billingType) {
+      alert("Please select a billing type");
+      return;
+    }
+
+    // Build query parameters for preview page
+    const params = new URLSearchParams({
+      job_ids: selectedJobIds.join(","),
+      billing_type: billingType,
+      invoice_type: invoiceType,
+      reward_amount: invoiceCalculation.reward_amount || "0",
+      discount_amount: invoiceCalculation.discount_amount || "0",
+    });
+
+    // Redirect to preview page
+    router.push(`/dashboard/invoice/preview?${params.toString()}`);
   };
 
   // Function to save invoice to database
@@ -2380,7 +2365,7 @@ export default function InvoiceCreationPage() {
                           if (invoiceType === "Partial Invoice") {
                             setShowPartialInvoiceModal(true);
                           }
-                          // If billingType is "Reimbursement", directly show sample invoice
+                          // If billingType is "Reimbursement", directly redirect to preview
                           // Otherwise, show the calculation modal
                           else if (billingType === "Reimbursement") {
                             handleShowSampleInvoice();
@@ -2490,7 +2475,7 @@ export default function InvoiceCreationPage() {
                           if (invoiceType === "Partial Invoice") {
                             setShowPartialInvoiceModal(true);
                           }
-                          // If billingType is "Reimbursement", directly show sample invoice
+                          // If billingType is "Reimbursement", directly redirect to preview
                           // Otherwise, show the calculation modal
                           else if (billingType === "Reimbursement") {
                             handleShowSampleInvoice();
@@ -3660,6 +3645,9 @@ export default function InvoiceCreationPage() {
                               0
                           ).toFixed(2)}
                     </div>
+
+
+                    
                   </div>
 
                   <div className="grid grid-cols-12 gap-4">
