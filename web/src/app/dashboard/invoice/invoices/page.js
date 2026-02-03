@@ -6,6 +6,7 @@ import { SelectBox } from '@/components/formComponents';
 import TableSearch from '@/components/TableSearch';
 import { useTableSearch } from '@/hooks/useTableSearch';
 import { usePagination } from '@/hooks/usePagination';
+import { useAccount } from '@/context/AccountContext';
 import api from '@/services/api';
 import { formatDateDDMMYYYY } from '@/utils/dateUtils';
 import { formatInvoiceType, getInvoiceTypeBadgeVariant } from '@/utils/invoiceUtils';
@@ -15,9 +16,54 @@ import Badge from '@/components/Badge';
 export default function InvoicesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { selectedAccount, accounts } = useAccount();
   const [invoiceType, setInvoiceType] = useState('');
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Helper function to get account ID from invoice
+  // Try to get from invoiceSelectedJobs -> job -> clientInfo -> account_id first
+  // Fallback to extracting from draft_view_id or proforma_view_id
+  const getAccountIdFromInvoice = (invoice) => {
+    // First, try to get account_id from invoiceSelectedJobs relationship
+    if (invoice.invoiceSelectedJobs && invoice.invoiceSelectedJobs.length > 0) {
+      const firstJob = invoice.invoiceSelectedJobs[0].job;
+      if (firstJob && firstJob.clientInfo && firstJob.clientInfo.account_id) {
+        return firstJob.clientInfo.account_id.toString();
+      }
+    }
+    
+    // Fallback: Extract from draft_view_id or proforma_view_id
+    const viewId = invoiceType === 'draft' ? invoice.draft_view_id : invoice.proforma_view_id;
+    if (!viewId || typeof viewId !== 'string') return null;
+    
+    // Format: D{account_id}{year_pair}{sequence} or P{account_id}{year_pair}{sequence}
+    // Example: D225260001 -> account_id is 2
+    const match = viewId.match(/^[DP](\d+)/);
+    if (match && match[1]) {
+      const accountIdStr = match[1];
+      // Try to match account IDs from the accounts array
+      for (let len = 1; len <= Math.min(3, accountIdStr.length); len++) {
+        const potentialAccountId = parseInt(accountIdStr.substring(0, len));
+        if (accounts && accounts.some(acc => acc.id === potentialAccountId)) {
+          return potentialAccountId.toString();
+        }
+      }
+      // If no match found, return the first digit as fallback
+      return accountIdStr.substring(0, 1);
+    }
+    return null;
+  };
+
+  // Filter invoices by selected account from session
+  // If "All Accounts" is selected (selectedAccount.id === 'all'), show all invoices
+  // Otherwise, filter by the selected account ID
+  const filteredInvoicesByAccount = selectedAccount && selectedAccount.id !== 'all'
+    ? invoices.filter(invoice => {
+        const invoiceAccountId = getAccountIdFromInvoice(invoice);
+        return invoiceAccountId === selectedAccount.id.toString();
+      })
+    : invoices;
 
   // Search functionality
   const searchFields = [
@@ -30,7 +76,7 @@ export default function InvoicesPage() {
     'addedByUser.last_name',
   ];
   const { searchTerm, setSearchTerm, filteredData: filteredInvoices, suggestions } = useTableSearch(
-    invoices,
+    filteredInvoicesByAccount,
     searchFields
   );
 
