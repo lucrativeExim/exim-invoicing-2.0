@@ -310,16 +310,16 @@ export default function InvoiceDisplay({
   return (
     <>
       {/* Invoice Container */}
-      <div className="max-w-4xl mx-auto p-4 print:p-0 print:max-w-full">
+      <div className="max-w-4xl mx-auto p-2 print:p-0 print:max-w-full" style={{ maxWidth: "210mm" }}>
         <div
           className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-4"
-          style={{ minHeight: "29.7cm" }}
+          style={{ minHeight: "29.7cm", width: "100%" }}
         >
           {/* Top Section: Company Info (Left) and Invoice Details (Right) */}
-          <div className="grid grid-cols-12 gap-4 mb-4">
+          <div className="grid grid-cols-12 gap-4 mb-2">
             {/* Left: Company Info */}
             <div className="col-span-7">
-              <div className="flex items-start mb-1">
+              <div className="flex items-start mb-0">
                 <div className="w-20 h-20 flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {!logoError ? (
                     <Image
@@ -419,7 +419,7 @@ export default function InvoiceDisplay({
 
           {/* Professional Service Charges Section */}
           <div className="mb-4">
-            <div className="bg-black text-white px-3 mb-2 py-2 flex justify-between items-center">
+            <div className="bg-gray-700 text-white px-3 mb-2 py-2 flex justify-between items-center">
               <span className="font-bold text-xs">
                 {billingType === "Reimbursement"
                   ? "PARTICULARS"
@@ -490,7 +490,7 @@ export default function InvoiceDisplay({
           </div>
 
           {/* Note Section */}
-          <div className="p-3 mb-4 ps-0 border-t border-b border-black">
+          <div className="p-3 mb-2 ps-0 border-t border-b border-black">
             <div className="text-xs">
               <span className={onEditNote ? "font-semibold print:hidden" : "font-semibold"}>
                 {onEditNote ? (
@@ -512,10 +512,10 @@ export default function InvoiceDisplay({
           </div>
 
           {/* Bottom Section: Bank Details (Left) and Charges/Taxes (Right) */}
-          <div className="grid grid-cols-2 gap-4 mb-1">
+          <div className="grid grid-cols-2 gap-4 pb-1">
             {/* Left: Bank Details */}
             <div className="">
-              <div className="p-0">
+              <div className="p-0 mb-1">
                 <div className="font-bold text-xs pb-1">BANK Details</div>
                 <div className="text-xs">
                   <div>{account?.bank_name || "NA"}</div>
@@ -532,8 +532,9 @@ export default function InvoiceDisplay({
                   </div>
                 </div>
               </div>
-              <div className="p-0 pt-5">
-                <div className="text-xs">
+              <div className="p-0 relative">
+                <div className="border-t border-black"></div>
+                <div className="text-xs pt-1 pb-1">
                   <div>
                     <span className="font-semibold">SAC No. :</span> {sacNo}
                   </div>
@@ -548,11 +549,20 @@ export default function InvoiceDisplay({
                     {account?.msme_details || "NA"}
                   </div>
                 </div>
+                <div className="border-t border-black"></div>
+                {/* Total Amount in Words */}
+                {invoiceCalculations && (
+                  <div className="text-xs pt-1 pb-1">
+                    <span className="font-semibold">Amount in Words : </span>
+                    <span className="font-semibold">Rs. </span>
+                    {invoiceCalculations.totalInWords}
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Right: Charges and Taxes */}
-            <div className="p-1">
+            <div className="p-0">
               <div className="text-xs grid grid-cols-12">
                 {billingType !== "Reimbursement" && (
                   <>
@@ -670,16 +680,8 @@ export default function InvoiceDisplay({
               </div>
             </div>
           </div>
+          <div className="border-t border-black"></div>
 
-          {/* Total Amount in Words */}
-          {invoiceCalculations && (
-            <div className="p-3 mb-2 ps-0 border-t border-b border-black">
-              <div className="text-xs">
-                <span className="font-semibold">Rs. </span>
-                {invoiceCalculations.totalInWords}
-              </div>
-            </div>
-          )}
 
           {/* Footer */}
           <div className="px-3 mb-1">
@@ -688,15 +690,19 @@ export default function InvoiceDisplay({
             </div>
           </div>
 
-          <div className="text-right mb-5">
+          <div className="text-right mt-5 pt-2">
             <span className="font-semibold text-sm">For {account?.account_name || "NA"}</span>
           </div>
           <div className="px-3 mb-2">
-            <div className="text-center  mt-5">
-              <span className="text-xs">
+            <div className="mt-1 text-center">
+              <span className="text-xs block">
+                As Per Rule 46(q) of GST act 2017 said Invoice is digitally signed
+              </span>
+              <span className="text-xs block">
                 Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
-                Ph:+91 20 3511 3202, Website: www.lucrative.co.in As Per Rule 46(q) of GST act
-                2017 said Invoice is digitally signed
+              </span>
+              <span className="text-xs block">
+                Ph:+91 20 3511 3202, Website: www.lucrative.co.in
               </span>
             </div>
           </div>
@@ -735,6 +741,11 @@ export default function InvoiceDisplay({
       {/* Print Styles */}
       <style jsx global>{`
         @media screen {
+          /* Ensure invoice container fits A4 width on screen */
+          .max-w-4xl {
+            max-width: 210mm !important;
+            width: 100% !important;
+          }
           .invoice-table-container {
             max-width: 210mm !important;
             width: 100% !important;
@@ -754,26 +765,32 @@ export default function InvoiceDisplay({
         }
         @media print {
           @page {
-            size: A4;
+            size: A4 portrait;
             margin: 1.5cm;
           }
           body {
             background: white !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
             overflow: visible !important;
             font-family: "Times New Roman", Times, serif !important;
             height: auto !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
           html {
             overflow: visible !important;
             height: auto !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
           * {
             scrollbar-width: none !important;
             -ms-overflow-style: none !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
             font-family: "Times New Roman", Times, serif !important;
           }
           *::-webkit-scrollbar {
@@ -800,12 +817,29 @@ export default function InvoiceDisplay({
           .print\\:bg-white {
             background: white !important;
           }
+          /* Ensure invoice container fits A4 page */
+          .max-w-4xl {
+            max-width: 100% !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
           /* Ensure all content is printed */
           body > * {
             display: block !important;
             visibility: visible !important;
             height: auto !important;
             overflow: visible !important;
+          }
+          /* Prevent page breaks in critical sections */
+          .invoice-page,
+          .annexure-page {
+            page-break-inside: avoid !important;
+            page-break-after: auto !important;
+          }
+          /* Ensure proper page breaks for annexure */
+          .annexure-page {
+            page-break-before: always !important;
           }
         }
       `}</style>

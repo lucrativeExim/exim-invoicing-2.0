@@ -243,7 +243,7 @@ export default function AnnexureTable({
 
     const fieldPairs = [
       {
-        header: "Aut No & Date",
+        header: "Auth No & Date",
         noField: {
           keys: [
             "authorisation_no",
@@ -916,21 +916,34 @@ export default function AnnexureTable({
                   <thead>
                     <tr className="bg-white text-black">
                       <th className="border border-black px-1 py-1.5 text-left font-bold align-top">Claim No</th>
-                      {dynamicCombinedFields.map((field, index) => (
-                        <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
-                          {field.header}
-                        </th>
-                      ))}
+                      {dynamicCombinedFields.map((field, index) => {
+                        // Split header if it contains "& Date" to display on next line
+                        const headerParts = field.header.split(" & Date");
+                        const headerText = headerParts.length > 1 
+                          ? (
+                              <>
+                                {headerParts[0]}
+                                <br />
+                                & Date
+                              </>
+                            )
+                          : field.header;
+                        return (
+                          <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
+                            {headerText}
+                          </th>
+                        );
+                      })}
                       {dynamicAmountFields.map((field, index) => (
                         <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
                           {field.name}
                         </th>
                       ))}
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Charges</th>
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CA Charges</th>
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CE Charges</th>
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Regi/Oth</th>
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Appl Fee</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Service <br /> Charges</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CA Cert <br /> Charges</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CE Cert <br />Charges</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Regi/Other <br /> Charges</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Appli <br /> Fees</th>
                       {remiFieldsArray.map((remiField, index) => (
                         <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
                           {remiField.description}
@@ -945,7 +958,19 @@ export default function AnnexureTable({
                       </td>
                       {dynamicCombinedFields.map((field, index) => (
                         <td key={index} className="border border-black px-1 py-1.5 align-top">
-                          {field.combinedValue}
+                          {field.noValue !== "NA" && field.dateValue !== "NA" ? (
+                            <>
+                              {field.noValue}
+                              <br />
+                              {field.dateValue}
+                            </>
+                          ) : field.noValue !== "NA" ? (
+                            field.noValue
+                          ) : field.dateValue !== "NA" ? (
+                            field.dateValue
+                          ) : (
+                            "NA"
+                          )}
                         </td>
                       ))}
                       {dynamicAmountFields.map((field, index) => (
@@ -999,19 +1024,19 @@ export default function AnnexureTable({
                     {/* Empty header for label column */}
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    Charges
+                    Service <br /> Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    CA Charges
+                    CA Cert <br /> Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    CE Charges
+                    CE Cert <br />Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    Regi/Oth
+                    Regi/Other <br /> Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    Appl Fee
+                    Appli <br /> Fees
                   </th>
                   {allUsedRemiFieldsArray.map((usedField, index) => (
                     <th 
@@ -1023,7 +1048,7 @@ export default function AnnexureTable({
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="mb-5">
                 <tr>
                   <td 
                     colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
@@ -1065,15 +1090,19 @@ export default function AnnexureTable({
         </div>
 
         {/* Footer Section */}
-        <div className="text-right mt-5 mb-5">
+        <div className="text-right mt-5 pt-5">
           <span className="font-semibold text-sm">For {accountName || "NA"}</span>
         </div>
         <div className="px-3 mb-2">
-          <div className="text-center mt-5">
-            <span className="text-xs">
+          <div className="text-center mt-1">
+            <span className="text-xs block">
+              As Per Rule 46(q) of GST act 2017 said Invoice is digitally signed
+            </span>
+            <span className="text-xs block">
               Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
-              Ph:+91 20 3511 3202, Website: www.lucrative.co.in As Per Rule 46(q) of GST act
-              2017 said Invoice is digitally signed
+            </span>
+            <span className="text-xs block">
+              Ph:+91 20 3511 3202, Website: www.lucrative.co.in
             </span>
           </div>
         </div>

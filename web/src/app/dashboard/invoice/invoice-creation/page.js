@@ -120,7 +120,6 @@ export default function InvoiceCreationPage() {
   });
   const rewardDiscountAmountInputRef = useRef(null);
   const isTypingRewardDiscountRef = useRef(false);
-  const isPrintingRef = useRef(false);
   const [invoiceBreakdown, setInvoiceBreakdown] = useState(null); // API response from /invoices/sample
   const [invoiceBreakdownLoading, setInvoiceBreakdownLoading] = useState(false);
 
@@ -3442,24 +3441,6 @@ export default function InvoiceCreationPage() {
                 className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 {loading ? "Saving..." : "Save Invoice"}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (!isPrintingRef.current) {
-                    isPrintingRef.current = true;
-                    window.print();
-                    // Reset after a short delay to allow print dialog to open
-                    setTimeout(() => {
-                      isPrintingRef.current = false;
-                    }, 1000);
-                  }
-                }}
-                className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium"
-              >
-                Print Invoice
               </button>
             </div>
           </div>

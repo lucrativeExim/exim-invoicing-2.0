@@ -221,9 +221,17 @@ export default function InvoicePreviewPage() {
     <>
       <style jsx global>{`
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 1.5cm;
+          }
           body {
             overflow: visible !important;
             height: auto !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            font-family: "Times New Roman", Times, serif !important;
           }
           html {
             overflow: visible !important;
@@ -235,6 +243,16 @@ export default function InvoicePreviewPage() {
             overflow: visible !important;
             inset: auto !important;
             max-height: none !important;
+          }
+          /* Ensure invoice content fits A4 */
+          .invoice-container,
+          .invoice-page {
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-after: auto;
+            page-break-inside: avoid;
           }
         }
       `}</style>

@@ -63,7 +63,17 @@ class AccountModel {
       updated_at: true,
     };
 
-    const where = { id: parseInt(id) };
+    // Validate id parameter
+    if (!id || id === null || id === undefined) {
+      return null;
+    }
+
+    const parsedId = parseInt(id);
+    if (isNaN(parsedId)) {
+      return null;
+    }
+
+    const where = { id: parsedId };
     if (!includeDeleted) {
       where.status = { not: 'Delete' };
     }

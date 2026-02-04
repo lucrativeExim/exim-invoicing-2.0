@@ -361,7 +361,7 @@ router.delete('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) =>
 // Generate PDF for sample invoice (preview) - Only Super Admin and Admin can access
 router.get('/sample/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
-    const { job_ids, billing_type, reward_amount, discount_amount, invoice_no, invoice_date, account_id } = req.query;
+    const { job_ids, billing_type, reward_amount, discount_amount, invoice_no, invoice_date, account_id, po_no, irn_no, note } = req.query;
 
     // Validate required fields
     if (!job_ids) {
@@ -391,6 +391,14 @@ router.get('/sample/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res
       discount_amount || 0
     );
 
+    // Merge breakdown with optional fields (po_no, irn_no, note)
+    const enhancedInvoice = {
+      ...breakdown,
+      po_no: po_no || null,
+      irn_no: irn_no || null,
+      note: note || null,
+    };
+
     // Get account data
     let account = null;
     const Account = require('../models/Account');
@@ -402,11 +410,11 @@ router.get('/sample/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res
     }
 
     // Generate PDF
-    const invoiceNo = invoice_no || "NA";
-    const invoiceDate = invoice_date || new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    const invoiceNo = (invoice_no && invoice_no.trim() !== "") ? invoice_no : "NA";
+    const invoiceDate = (invoice_date && invoice_date.trim() !== "") ? invoice_date : new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
     
     const pdfBuffer = await PdfService.generateInvoicePdf(
-      breakdown,
+      enhancedInvoice,
       account,
       invoiceNo,
       invoiceDate,
@@ -461,15 +469,60 @@ router.get('/:id/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res) =
     };
 
     // Get account data
-    const Account = require('../models/Account');
-    const account = await Account.findById(invoice.account_id);
+    let account = null;
+    if (invoice.account_id) {
+      try {
+        const Account = require('../models/Account');
+        account = await Account.findById(invoice.account_id);
+      } catch (error) {
+        console.error('Error fetching account:', error);
+        // Continue without account - PDF will use default/fallback values
+      }
+    }
+    
+    // If account not found, try to get from breakdown
+    if (!account && breakdown.accountId) {
+      try {
+        const Account = require('../models/Account');
+        account = await Account.findById(breakdown.accountId);
+      } catch (error) {
+        console.error('Error fetching account from breakdown:', error);
+      }
+    }
 
-    // Generate PDF
+    // Generate PDF - Use same logic as web view for invoice number and date
+    // Invoice Number: For Proforma Invoice, prioritize proforma_view_id, for Draft use draft_view_id
+    let invoiceNo = "NA";
+    if (invoice.invoice_stage_status === "Proforma") {
+      invoiceNo = invoice.proforma_view_id || invoice.draft_view_id || invoice.invoice_no || "NA";
+    } else {
+      invoiceNo = invoice.draft_view_id || invoice.proforma_view_id || invoice.invoice_no || "NA";
+    }
+    
+    // Invoice Date: For Proforma Invoice, use proforma_created_at if available, otherwise fallback to created_at
+    let invoiceDate = "NA";
+    let dateToUse = null;
+    if (invoice.invoice_stage_status === "Proforma" && invoice.proforma_created_at) {
+      dateToUse = invoice.proforma_created_at;
+    } else if (invoice.created_at) {
+      dateToUse = invoice.created_at;
+    } else if (invoice.invoice_date) {
+      dateToUse = invoice.invoice_date;
+    }
+    
+    if (dateToUse) {
+      const date = new Date(dateToUse);
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = date.getFullYear();
+      invoiceDate = `${day}-${month}-${year}`;
+    }
+    
     const pdfBuffer = await PdfService.generateInvoicePdf(
       enhancedInvoice,
       account,
-      enhancedInvoice.invoiceNo,
-      enhancedInvoice.invoiceDate,
+      invoiceNo,
+      invoiceDate,
       jobIds
     );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/services/api";
 import { useAccount } from "@/context/AccountContext";
@@ -28,6 +28,8 @@ export default function InvoiceViewPage() {
   const [noteInput, setNoteInput] = useState("");
   const [isUpdatingNote, setIsUpdatingNote] = useState(false);
   const [isShiftingToProforma, setIsShiftingToProforma] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const isPrintingRef = useRef(false);
 
   // Lock body scroll when invoice is displayed (Draft/Proforma Invoice)
   useEffect(() => {
@@ -288,6 +290,46 @@ export default function InvoiceViewPage() {
     }
   };
 
+  // Handle PDF generation and download
+  const handleGeneratePdf = async () => {
+    try {
+      if (!invoice || !invoiceId) {
+        alert("Invoice data not loaded. Please wait...");
+        return;
+      }
+
+      if (isPrintingRef.current) return;
+      isPrintingRef.current = true;
+      setGeneratingPdf(true);
+
+      // Use the invoice-specific PDF endpoint which includes po_no, irn_no, and note
+      const response = await api.get(`/invoices/${invoiceId}/pdf`, {
+        responseType: 'blob', // Important for binary data
+      });
+
+      // Create blob URL and trigger download
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `invoice-${invoiceNumber}-${invoiceDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      const errorMessage =
+        error.response?.data?.error ||
+        error.message ||
+        "Failed to generate PDF. Please try again.";
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      setGeneratingPdf(false);
+      isPrintingRef.current = false;
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -353,10 +395,12 @@ export default function InvoiceViewPage() {
             </button>
           )}
           <button
-            onClick={() => window.print()}
-            className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium"
+            type="button"
+            onClick={handleGeneratePdf}
+            disabled={generatingPdf}
+            className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
-            Print Invoice
+            {generatingPdf ? "Generating PDF..." : "Download PDF"}
           </button>
         </div>
       </div>
@@ -370,7 +414,6 @@ export default function InvoiceViewPage() {
         jobIds={jobIds}
         isLoading={loading}
         onBack={() => router.back()}
-        onPrint={() => window.print()}
         onEditPO={handleOpenPOModal}
         onEditIRN={isProforma ? handleOpenIRNModal : undefined}
         onEditNote={handleOpenNoteModal}

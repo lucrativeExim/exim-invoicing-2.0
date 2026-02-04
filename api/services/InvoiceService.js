@@ -265,6 +265,7 @@ class InvoiceService {
       { desc: 'remi_five_desc', charges: 'remi_five_charges' },
     ];
 
+    
     remiFieldsConfig.forEach((field) => {
       const description = jobServiceCharge[field.desc];
       const charges = jobServiceCharge[field.charges];
@@ -283,7 +284,6 @@ class InvoiceService {
             parsedCharges = parseFloat(chargesStr) || 0;
           }
         }
-
         remiFields.push({
           description: String(description).trim(),
           charges: parsedCharges,
@@ -489,6 +489,12 @@ class InvoiceService {
           );
           if (existingRemiField) {
             existingRemiField.charges += remiField.charges;
+          }else{
+            remiFields.push({
+              description: remiField.description,
+              charges: remiField.charges,
+              fieldName: remiField.fieldName,
+            });
           }
 
           // Also populate remi charges map (sum across all jobs)
@@ -524,22 +530,13 @@ class InvoiceService {
     // Calculate final amounts based on billing type
     let finalAmount = 0;
     let payAmount = 0;
-console.log("billingType", billingType);
     if (billingType === 'Service') {
-      console.log("condition 1");
       finalAmount = serviceSubtotal + gst.cgstAmount + gst.sgstAmount + gst.igstAmount;
       payAmount = finalAmount;
     } else if (billingType === 'Reimbursement') {
-      console.log("condition 2");
       finalAmount = reimbursementSubtotal;
       payAmount = finalAmount;
     } else if (billingType === 'Service_Reimbursement') {
-      console.log("condition 3");
-      console.log("serviceSubtotal", serviceSubtotal);
-      console.log("reimbursementSubtotal", reimbursementSubtotal);
-      console.log("gst.cgstAmount", gst.cgstAmount);
-      console.log("gst.sgstAmount", gst.sgstAmount);
-      console.log("gst.igstAmount", gst.igstAmount);
       finalAmount =
         serviceSubtotal +
         reimbursementSubtotal +
@@ -548,7 +545,6 @@ console.log("billingType", billingType);
         gst.igstAmount;
       payAmount = finalAmount;
     }
-    console.log("finalAmount", finalAmount);
 
     // Fetch job register for job code and SAC No
     let jobRegister = null;
