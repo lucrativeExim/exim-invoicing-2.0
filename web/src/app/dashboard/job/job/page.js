@@ -515,7 +515,7 @@ export default function JobPage() {
                 value={searchTerm}
                 onChange={setSearchTerm}
                 suggestions={suggestions}
-                placeholder="Search jobs by job no, claim no, PO no, client name..."
+                placeholder="Search..."
                 data={jobsForSearch}
                 searchFields={searchFields}
                 maxSuggestions={5}

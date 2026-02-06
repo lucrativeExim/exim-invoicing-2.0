@@ -1,0 +1,59 @@
+# Cursor Rules for EXIM Invoicing 2.0
+
+## Form Components Usage
+
+### Button Component
+**CRITICAL**: Always use the `Button` component from `@/components/formComponents` instead of writing raw `<button>` HTML elements.
+
+- **Import**: `import { Button } from '@/components/formComponents';`
+- **Location**: `web/src/components/formComponents/Button.js`
+- **Available Variants**: `primary`, `secondary`, `outline`, `danger`
+- **Available Sizes**: `sm`, `md`, `lg`
+- **Props**: `type`, `variant`, `size`, `disabled`, `onClick`, `className`, `children`
+
+**Examples:**
+```jsx
+// ✅ CORRECT - Use Button component
+import { Button } from '@/components/formComponents';
+
+<Button variant="primary" onClick={handleSave}>Save</Button>
+<Button variant="secondary" onClick={handleCancel}>Cancel</Button>
+<Button variant="danger" onClick={handleDelete}>Delete</Button>
+<Button variant="outline" size="sm">Small Button</Button>
+
+// ❌ WRONG - Don't use raw button elements
+<button onClick={handleSave} className="px-4 py-2 bg-primary-600...">Save</button>
+```
+
+**When creating forms or any UI with buttons:**
+1. Always import Button from formComponents
+2. Use appropriate variant (primary for main actions, secondary for cancel/reset, danger for destructive actions)
+3. Use size prop for different button sizes
+4. Use className prop only for minor style overrides when necessary
+5. Never write raw `<button>` HTML elements
+
+### Other Form Components
+All form components are located in `web/src/components/formComponents/`:
+- `Input` - Text inputs, email, password, etc.
+- `SelectBox` - Dropdown selects
+- `DateInput` - Date picker inputs
+- `Alert` - Alert/notification messages
+- `Badge` - Status badges
+
+Always import these from `@/components/formComponents` instead of creating custom implementations.
+
+## Component Organization
+
+- Form components: `web/src/components/formComponents/`
+- Page components: `web/src/app/dashboard/`
+- Shared components: `web/src/components/`
+- Services: `web/src/services/`
+- Utils: `web/src/utils/`
+
+## Code Style
+
+- Use functional components with hooks
+- Use TypeScript-style JSDoc comments for component props
+- Follow existing patterns for API calls and state management
+- Use Tailwind CSS for styling
+- Prefer composition over configuration

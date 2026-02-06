@@ -248,6 +248,139 @@ router.post('/', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   }
 });
 
+// Update invoice jobs - Only Super Admin and Admin can update
+// This endpoint specifically handles updating jobs and recalculating amounts
+router.put('/:id/jobs', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  console.log(`[PUT /:id/jobs] Received request for invoice ID: ${req.params.id}`);
+  try {
+    const { job_ids } = req.body;
+
+    // Validate job_ids
+    if (!job_ids || !Array.isArray(job_ids) || job_ids.length === 0) {
+      return res.status(400).json({ error: 'job_ids array with at least one job ID is required' });
+    }
+
+    // Fetch current invoice to get billing type and other needed info
+    const currentInvoice = await Invoice.findById(req.params.id);
+    
+    if (!currentInvoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    const billingType = currentInvoice.billing_type;
+    if (!billingType) {
+      return res.status(400).json({ error: 'Billing type is required for this invoice' });
+    }
+
+    // Get reward_amount and discount_amount from current invoice
+    const rewardAmount = currentInvoice.reward_amount || 0;
+    const discountAmount = currentInvoice.discount_amount || 0;
+
+    // Recalculate invoice breakdown using InvoiceService (same as invoice creation)
+    const breakdown = await InvoiceService.calculateInvoiceBreakdown(
+      job_ids,
+      billingType,
+      rewardAmount,
+      discountAmount
+    );
+
+    // Prepare update data with recalculated amounts
+    const updateData = {
+      job_ids: job_ids, // This will trigger job update in Invoice.update()
+      // Update all calculated amounts
+      professional_charges: breakdown.professionalCharges,
+      registration_other_charges: breakdown.registrationCharges,
+      ca_charges: breakdown.caCharges,
+      ce_charges: breakdown.ceCharges,
+      ca_cert_count: breakdown.caCertCount,
+      ce_cert_count: breakdown.ceCertCount,
+      application_fees: breakdown.applicationFees,
+      remi_one_charges: breakdown.remiOneCharges,
+      remi_two_charges: breakdown.remiTwoCharges,
+      remi_three_charges: breakdown.remiThreeCharges,
+      remi_four_charges: breakdown.remiFourCharges,
+      remi_five_charges: breakdown.remiFiveCharges,
+      amount: breakdown.amount,
+      pay_amount: breakdown.payAmount,
+      reward_amount: breakdown.rewardAmount,
+      discount_amount: breakdown.discountAmount,
+    };
+
+    // Update invoice with new jobs and recalculated amounts
+    const invoice = await Invoice.update(req.params.id, updateData);
+
+    // Fetch updated invoice with full breakdown (same as GET /:id endpoint)
+    // This ensures the response includes all job relations and breakdown data
+    const updatedInvoice = await Invoice.findById(req.params.id);
+    
+    if (!updatedInvoice) {
+      return res.status(404).json({ error: 'Invoice not found after update' });
+    }
+
+    // Extract job IDs from updated invoice
+    const updatedJobIds = updatedInvoice.invoiceSelectedJobs
+      ? updatedInvoice.invoiceSelectedJobs.map((invoiceJob) => invoiceJob.job?.id).filter(Boolean)
+      : [];
+
+    if (updatedJobIds.length === 0) {
+      // If no jobs, return invoice as-is
+      const serializedInvoice = convertBigIntToString(updatedInvoice);
+      return res.json({
+        ...serializedInvoice,
+        message: 'Invoice jobs updated and amounts recalculated successfully',
+      });
+    }
+
+    // Recalculate breakdown to include full job data (jobs, jobServiceChargesMap, etc.)
+    const fullBreakdown = await InvoiceService.calculateInvoiceBreakdown(
+      updatedJobIds,
+      billingType,
+      rewardAmount,
+      discountAmount
+    );
+
+    // Merge invoice data with breakdown data (same as GET /:id endpoint)
+    const enhancedInvoice = {
+      ...updatedInvoice,
+      // Override calculated fields with breakdown (ensures consistency)
+      professionalCharges: fullBreakdown.professionalCharges,
+      registrationCharges: fullBreakdown.registrationCharges,
+      caCharges: fullBreakdown.caCharges,
+      ceCharges: fullBreakdown.ceCharges,
+      applicationFees: fullBreakdown.applicationFees,
+      caCertCount: fullBreakdown.caCertCount,
+      ceCertCount: fullBreakdown.ceCertCount,
+      remiFields: fullBreakdown.remiFields,
+      remiCharges: fullBreakdown.remiCharges,
+      rewardAmount: fullBreakdown.rewardAmount,
+      discountAmount: fullBreakdown.discountAmount,
+      gst: fullBreakdown.gst,
+      serviceSubtotal: fullBreakdown.serviceSubtotal,
+      reimbursementSubtotal: fullBreakdown.reimbursementSubtotal,
+      finalAmount: fullBreakdown.finalAmount,
+      // Additional data for display (from breakdown)
+      jobs: fullBreakdown.jobs,
+      jobServiceChargesMap: fullBreakdown.jobServiceChargesMap,
+      jobProfessionalChargesMap: fullBreakdown.jobProfessionalChargesMap,
+      jobRegister: fullBreakdown.jobRegister || updatedInvoice.jobRegister,
+      billingFieldNames: fullBreakdown.billingFieldNames,
+    };
+
+    // Convert BigInt values to strings before serialization
+    const serializedInvoice = convertBigIntToString(enhancedInvoice);
+    res.json({
+      ...serializedInvoice,
+      message: 'Invoice jobs updated and amounts recalculated successfully',
+    });
+  } catch (error) {
+    console.error('Error updating invoice jobs:', error);
+    res.status(500).json({ 
+      error: 'Failed to update invoice jobs',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
 // Update invoice - Only Super Admin and Admin can update
 router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
@@ -346,6 +479,54 @@ router.put('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   }
 });
 
+// Cancel invoice - Only Super Admin and Admin can cancel
+router.post('/:id/cancel', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
+  try {
+    const { cancel_reason, action } = req.body; // action: 'cancel' or 'cancelAndEdit'
+
+    if (!cancel_reason || cancel_reason.trim() === '') {
+      return res.status(400).json({ error: 'Cancellation reason is required' });
+    }
+
+    if (action === 'cancelAndEdit') {
+      // Cancel and create a clone
+      const clonedInvoice = await Invoice.cancelAndClone(
+        req.params.id,
+        cancel_reason.trim(),
+        req.user.id
+      );
+
+      // Convert BigInt values to strings before serialization
+      const serializedInvoice = convertBigIntToString(clonedInvoice);
+      res.json({
+        ...serializedInvoice,
+        message: 'Invoice canceled and cloned successfully',
+        newInvoiceId: clonedInvoice.id,
+      });
+    } else {
+      // Just cancel
+      const canceledInvoice = await Invoice.cancel(
+        req.params.id,
+        cancel_reason.trim(),
+        req.user.id
+      );
+
+      // Convert BigInt values to strings before serialization
+      const serializedInvoice = convertBigIntToString(canceledInvoice);
+      res.json({
+        ...serializedInvoice,
+        message: 'Invoice canceled successfully',
+      });
+    }
+  } catch (error) {
+    console.error('Error canceling invoice:', error);
+    res.status(500).json({
+      error: 'Failed to cancel invoice',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
 // Delete invoice (soft delete) - Only Super Admin and Admin can delete
 router.delete('/:id', requireRole(['Super_Admin', 'Admin']), async (req, res) => {
   try {
@@ -411,7 +592,7 @@ router.get('/sample/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res
 
     // Generate PDF
     const invoiceNo = (invoice_no && invoice_no.trim() !== "") ? invoice_no : "NA";
-    const invoiceDate = (invoice_date && invoice_date.trim() !== "") ? invoice_date : new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    const invoiceDate = (invoice_date && invoice_date.trim() !== "") ? invoice_date : new Date().toLocaleDateString('en-GB');
     
     const pdfBuffer = await PdfService.generateInvoicePdf(
       enhancedInvoice,
@@ -462,7 +643,7 @@ router.get('/:id/pdf', requireRole(['Super_Admin', 'Admin']), async (req, res) =
     const enhancedInvoice = {
       ...breakdown,
       invoiceNo: invoice.invoice_no,
-      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-GB').replace(/\//g, '-') : "NA",
+      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-GB') : "NA",
       po_no: invoice.po_no,
       irn_no: invoice.irn_no,
       note: invoice.note,

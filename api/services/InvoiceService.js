@@ -617,6 +617,7 @@ class InvoiceService {
         dbk_claim_date: job.dbk_claim_date,
         no_of_cac: job.no_of_cac,
         no_of_cec: job.no_of_cec,
+        remark: job.remark,
         jobFieldValues: jobFieldValues,
       });
 

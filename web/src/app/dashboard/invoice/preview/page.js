@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/services/api";
 import { useAccount } from "@/context/AccountContext";
 import InvoiceDisplay from "@/components/InvoiceDisplay";
+import { Button } from "@/components/formComponents";
 
 export default function InvoicePreviewPage() {
   const router = useRouter();
@@ -173,8 +174,17 @@ export default function InvoicePreviewPage() {
       const response = await api.post("/invoices", invoiceData);
 
       if (response.data) {
-        alert("Invoice saved successfully!");
-        router.push("/dashboard/invoice/invoices?type=draft");
+        // Extract invoice ID from response
+        const invoiceId = response.data.id || response.data.invoice_id;
+        
+        if (invoiceId) {
+          alert("Invoice saved successfully!");
+          // Redirect to the saved invoice detail page
+          router.push(`/dashboard/invoice/invoices/view/${invoiceId}`);
+        } else {
+          alert("Invoice saved successfully, but could not redirect. Invoice ID not found in response.");
+          router.push("/dashboard/invoice/invoices?type=draft");
+        }
       }
     } catch (error) {
       console.error("Error saving invoice:", error);
@@ -259,31 +269,33 @@ export default function InvoicePreviewPage() {
       <div className="fixed inset-0 bg-white z-50 overflow-y-auto print:bg-white">
         {/* Action Buttons - Hidden on Print */}
         <div className="bg-white border-b border-gray-200 p-2 flex justify-between items-center print:hidden sticky top-0 z-50 shadow-sm">
-        <button
+        <Button
           onClick={() => router.back()}
-          className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+          variant="secondary"
+          className="bg-gray-500 hover:bg-gray-600"
         >
           ← Back
-        </button>
+        </Button>
         <div className="flex justify-center">
           <h1 className="text-2xl font-bold text-gray-900">Invoice Preview</h1>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={handleSaveInvoice}
             disabled={loading}
-            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+            variant="primary"
+            className="bg-green-600 hover:bg-green-700"
           >
             {loading ? "Saving..." : "Save Invoice"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={handleGeneratePdf}
             disabled={generatingPdf}
-            className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+            variant="primary"
           >
             {generatingPdf ? "Generating PDF..." : "Download PDF"}
-          </button>
+          </Button>
         </div>
       </div>
 

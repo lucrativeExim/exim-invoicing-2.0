@@ -5,6 +5,7 @@ import Image from "next/image";
 import logoImage from "@/assets/images/invoice-logo.png";
 import AnnexureTable from "@/components/AnnexureTable";
 import { calculateServiceSubtotal as calculateServiceSubtotalUtil } from "@/utils/invoiceUtils";
+import { formatFieldValue } from "@/utils/dateUtils";
 
 // Helper function to get field value from JobFieldValue table
 const getFieldValueFromJobFieldValue = (
@@ -51,6 +52,39 @@ const getFieldValueFromJobFieldValue = (
   }
 
   return null;
+};
+
+// Helper function to check if field name is Quantity (case-insensitive)
+const isQuantityField = (fieldName) => {
+  if (!fieldName) return false;
+  const lowerFieldName = fieldName.toLowerCase().trim();
+  return lowerFieldName === "quantity";
+};
+
+// Helper function to calculate total quantity across all jobs
+const calculateTotalQuantity = (jobIds, jobFieldValuesMap, fieldName) => {
+  if (!jobIds || jobIds.length === 0) return null;
+  
+  let total = 0;
+  let hasValidQuantity = false;
+
+  jobIds.forEach((jobId) => {
+    const quantityValue = getFieldValueFromJobFieldValue(
+      jobId,
+      fieldName,
+      jobFieldValuesMap
+    );
+    
+    if (quantityValue !== null && quantityValue !== undefined && quantityValue !== "NA") {
+      const numValue = parseFloat(quantityValue);
+      if (!isNaN(numValue)) {
+        total += numValue;
+        hasValidQuantity = true;
+      }
+    }
+  });
+
+  return hasValidQuantity ? total : null;
 };
 
 // Helper function to convert number to words (Indian currency format)
@@ -365,7 +399,7 @@ export default function InvoiceDisplay({
             <div className="col-span-1"></div>
             {/* Right: Invoice Details Box */}
             <div className="col-span-4">
-              <div className="p-3">
+              <div className="p-2">
                 <div className="font-bold text-base mb-1 text-start">
                   {billingType === "Reimbursement" ? "Reimbursement/Debit Note" : "GST Invoice"}
                 </div>
@@ -459,15 +493,34 @@ export default function InvoiceDisplay({
                                 jobFieldValuesMap
                               ) || "NA"
                             : "NA";
+                        
+                        // For Quantity field with multiple jobs, calculate total
+                        let displayValue = fieldValue;
+                        if (jobIds.length > 1 && isQuantityField(fieldName)) {
+                          const totalQuantity = calculateTotalQuantity(
+                            jobIds,
+                            jobFieldValuesMap,
+                            fieldName
+                          );
+                          if (totalQuantity !== null) {
+                            displayValue = totalQuantity;
+                          } else {
+                            displayValue = "As Per Annexure";
+                          }
+                        } else if (jobIds.length > 1) {
+                          displayValue = "As Per Annexure";
+                        } else {
+                          // Format date values to dd-mm-yyyy format
+                          displayValue = formatFieldValue(displayValue);
+                        }
+                        
                         return (
                           <div key={index} className="grid grid-cols-10 gap-4 text-xs">
                             <div className="col-span-6">
                               <span className="text-xs">{fieldName}</span>
                             </div>
                             <div className="col-span-4 text-start">
-                              <span>
-                                {jobIds.length > 1 ? "As Per Annexure" : fieldValue}
-                              </span>
+                              <span>{displayValue}</span>
                             </div>
                           </div>
                         );
@@ -476,6 +529,36 @@ export default function InvoiceDisplay({
                   ) : (
                     <div className="font-semibold text-xs mb-1"></div>
                   )}
+                  {/* Display Remark field when only one job is selected */}
+                  {jobIds.length === 1 && (() => {
+                    const remarkValue = 
+                      getFieldValueFromJobFieldValue(
+                        jobIds[0],
+                        "remark",
+                        jobFieldValuesMap
+                      ) ||
+                      getFieldValueFromJobFieldValue(
+                        jobIds[0],
+                        "Remark",
+                        jobFieldValuesMap
+                      ) ||
+                      (firstJob?.remark) ||
+                      null;
+                    
+                    if (remarkValue && remarkValue.trim() !== "") {
+                      return (
+                        <div className="mt-1 grid grid-cols-10 gap-4 text-xs">
+                          <div className="col-span-2">
+                            <span className="text-xs">Remark</span>
+                          </div>
+                          <div className="col-span-8 text-start">
+                            <span>{remarkValue}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="col-span-12 md:col-span-2"></div>
               </div>
@@ -534,7 +617,7 @@ export default function InvoiceDisplay({
               </div>
               <div className="p-0 relative">
                 <div className="border-t border-black"></div>
-                <div className="text-xs pt-1 pb-1">
+                <div className="text-xs pt-3 pb-1">
                   <div>
                     <span className="font-semibold">SAC No. :</span> {sacNo}
                   </div>
@@ -552,9 +635,9 @@ export default function InvoiceDisplay({
                 <div className="border-t border-black"></div>
                 {/* Total Amount in Words */}
                 {invoiceCalculations && (
-                  <div className="text-xs pt-1 pb-1">
+                  <div className="text-xs pt-3 pb-1">
                     <span className="font-semibold">Amount in Words : </span>
-                    <span className="font-semibold">Rs. </span>
+                    <span className="font-semibold">₹. </span>
                     {invoiceCalculations.totalInWords}
                   </div>
                 )}
@@ -702,7 +785,7 @@ export default function InvoiceDisplay({
                 Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
               </span>
               <span className="text-xs block">
-                Ph:+91 20 3511 3202, Website: www.lucrative.co.in
+                Ph:+91 20 3511 3202 : www.lucrative.co.in
               </span>
             </div>
           </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { authService } from '@/services/authService';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
@@ -10,6 +10,7 @@ import { PageTitleProvider } from '@/context/PageTitleContext';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -26,6 +27,13 @@ export default function DashboardLayout({ children }) {
     setUser(currentUser);
     setLoading(false);
   }, [router]);
+
+  // Collapse sidebar by default when on invoice view page
+  useEffect(() => {
+    if (pathname?.startsWith('/dashboard/invoice/invoices/view/')) {
+      setSidebarCollapsed(true);
+    }
+  }, [pathname]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed(!sidebarCollapsed);

@@ -249,8 +249,44 @@ class InvoiceModel {
                 },
                 clientInfo: true,
                 clientBu: true,
+                processor: {
+                  select: {
+                    id: true,
+                    first_name: true,
+                    last_name: true,
+                  },
+                },
               },
             },
+          },
+        },
+        addedByUser: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        proformaCreatedByUser: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        proformaCanceledByUser: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        linkedCanceledInvoice: {
+          select: {
+            id: true,
+            draft_view_id: true,
+            proforma_view_id: true,
+            invoice_stage_status: true,
           },
         },
       },
@@ -276,6 +312,20 @@ class InvoiceModel {
           },
         },
         addedByUser: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        proformaCreatedByUser: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        proformaCanceledByUser: {
           select: {
             id: true,
             first_name: true,
@@ -471,6 +521,7 @@ class InvoiceModel {
       invoice_status,
       invoice_stage_status,
       proforma_created_by,
+      job_ids, // Array of job IDs to update InvoiceSelectedJob entries
     } = data;
 
     // If shifting to Proforma, generate proforma_view_id
@@ -559,6 +610,53 @@ class InvoiceModel {
       }
     }
 
+    // Update invoice selected jobs if job_ids is provided
+    if (job_ids && Array.isArray(job_ids) && job_ids.length > 0) {
+      return await prisma.$transaction(async (tx) => {
+        // Update the invoice
+        const updatedInvoice = await tx.invoice.update({
+          where: { id: parseInt(id) },
+          data: updateData,
+        });
+
+        // Delete existing invoice selected jobs
+        await tx.invoiceSelectedJob.deleteMany({
+          where: { invoice_id: parseInt(id) },
+        });
+
+        // Create new invoice selected jobs
+        await Promise.all(
+          job_ids.map((job_id) => {
+            const parsedJobId = parseInt(job_id);
+            if (isNaN(parsedJobId)) {
+              throw new Error(`Invalid job_id: ${job_id}`);
+            }
+            
+            return tx.invoiceSelectedJob.create({
+              data: {
+                invoice_id: parseInt(id),
+                job_id: parsedJobId,
+                created_at: getISTDateTime(),
+              },
+            });
+          })
+        );
+
+        // Return updated invoice with selected jobs
+        return await tx.invoice.findUnique({
+          where: { id: parseInt(id) },
+          include: {
+            jobRegister: true,
+            invoiceSelectedJobs: {
+              include: {
+                job: true,
+              },
+            },
+          },
+        });
+      });
+    }
+
     return await prisma.invoice.update({
       where: { id: parseInt(id) },
       data: updateData,
@@ -570,6 +668,174 @@ class InvoiceModel {
           },
         },
       },
+    });
+  }
+
+  /**
+   * Cancel invoice
+   */
+  async cancel(id, cancel_reason, canceled_by) {
+    return await prisma.invoice.update({
+      where: { id: parseInt(id) },
+      data: {
+        invoice_stage_status: 'Canceled',
+        invoice_status: 'InActive',
+        cancel_reason: cancel_reason || null,
+        proforma_canceled_at: getISTDateTime(),
+        proforma_canceled_by: canceled_by ? parseInt(canceled_by) : null,
+      },
+      include: {
+        jobRegister: true,
+        invoiceSelectedJobs: {
+          include: {
+            job: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Cancel invoice and create a clone for editing
+   */
+  async cancelAndClone(id, cancel_reason, canceled_by) {
+    return await prisma.$transaction(async (tx) => {
+      // First, cancel the original invoice
+      const canceledInvoice = await tx.invoice.update({
+        where: { id: parseInt(id) },
+        data: {
+          invoice_stage_status: 'Canceled',
+          invoice_status: 'InActive',
+          cancel_reason: cancel_reason || null,
+          proforma_canceled_at: getISTDateTime(),
+          proforma_canceled_by: canceled_by ? parseInt(canceled_by) : null,
+        },
+        include: {
+          invoiceSelectedJobs: {
+            include: {
+              job: true,
+            },
+          },
+        },
+      });
+
+      // Get account_id from the canceled invoice's jobs
+      // Need to fetch jobs with clientInfo
+      let accountId = null;
+      if (canceledInvoice.invoiceSelectedJobs && canceledInvoice.invoiceSelectedJobs.length > 0) {
+        const firstJobId = canceledInvoice.invoiceSelectedJobs[0].job?.id || canceledInvoice.invoiceSelectedJobs[0].job_id;
+        if (firstJobId) {
+          const firstJob = await tx.job.findUnique({
+            where: { id: parseInt(firstJobId) },
+            include: {
+              clientInfo: {
+                select: {
+                  account_id: true,
+                },
+              },
+            },
+          });
+          if (firstJob && firstJob.clientInfo && firstJob.clientInfo.account_id) {
+            accountId = firstJob.clientInfo.account_id;
+          }
+        }
+      }
+
+      // Generate draft_view_id for the new invoice
+      let draftViewId = null;
+      if (accountId) {
+        try {
+          draftViewId = await this.generateDraftViewId(parseInt(accountId));
+        } catch (error) {
+          console.error('Error generating draft_view_id:', error);
+        }
+      }
+
+      // Helper function to convert to Decimal-compatible value
+      const toDecimal = (value) => {
+        if (value === null || value === undefined || value === '') return 0;
+        const num = parseFloat(value);
+        return isNaN(num) ? 0 : num;
+      };
+
+      // Create a clone of the invoice
+      const clonedInvoice = await tx.invoice.create({
+        data: {
+          draft_view_id: draftViewId,
+          job_register_id: canceledInvoice.job_register_id,
+          billing_type: canceledInvoice.billing_type,
+          invoice_type: canceledInvoice.invoice_type,
+          pay_amount: canceledInvoice.pay_amount ? String(canceledInvoice.pay_amount) : null,
+          amount: canceledInvoice.amount ? String(canceledInvoice.amount) : null,
+          professional_charges: toDecimal(canceledInvoice.professional_charges),
+          registration_other_charges: toDecimal(canceledInvoice.registration_other_charges),
+          ca_charges: toDecimal(canceledInvoice.ca_charges),
+          ce_charges: toDecimal(canceledInvoice.ce_charges),
+          ca_cert_count: canceledInvoice.ca_cert_count ? parseInt(canceledInvoice.ca_cert_count) : null,
+          ce_cert_count: canceledInvoice.ce_cert_count ? parseInt(canceledInvoice.ce_cert_count) : null,
+          application_fees: toDecimal(canceledInvoice.application_fees),
+          remi_one_charges: toDecimal(canceledInvoice.remi_one_charges),
+          remi_two_charges: toDecimal(canceledInvoice.remi_two_charges),
+          remi_three_charges: toDecimal(canceledInvoice.remi_three_charges),
+          remi_four_charges: toDecimal(canceledInvoice.remi_four_charges),
+          remi_five_charges: toDecimal(canceledInvoice.remi_five_charges),
+          reward_amount: toDecimal(canceledInvoice.reward_amount),
+          discount_amount: toDecimal(canceledInvoice.discount_amount),
+          note: canceledInvoice.note || null,
+          po_no: canceledInvoice.po_no || null,
+          irn_no: null, // Reset IRN for new invoice
+          status: 'Open',
+          invoice_status: 'Active',
+          invoice_stage_status: 'Draft',
+          linked_canceled_invoice: canceledInvoice.id, // Link to canceled invoice
+          created_at: getISTDateTime(),
+          added_by: canceled_by ? parseInt(canceled_by) : null,
+        },
+      });
+
+      // Clone all invoiceSelectedJobs
+      if (canceledInvoice.invoiceSelectedJobs && canceledInvoice.invoiceSelectedJobs.length > 0) {
+        await Promise.all(
+          canceledInvoice.invoiceSelectedJobs.map((invoiceJob) => {
+            const jobId = invoiceJob.job?.id || invoiceJob.job_id;
+            if (!jobId) return null;
+
+            const invoiceSelectedJobData = {
+              invoice: {
+                connect: { id: clonedInvoice.id }
+              },
+              job: {
+                connect: { id: parseInt(jobId) }
+              },
+            };
+
+            if (canceled_by) {
+              invoiceSelectedJobData.createdByUser = {
+                connect: { id: parseInt(canceled_by) }
+              };
+            }
+
+            invoiceSelectedJobData.created_at = getISTDateTime();
+
+            return tx.invoiceSelectedJob.create({
+              data: invoiceSelectedJobData,
+            });
+          })
+        );
+      }
+
+      // Return the cloned invoice with selected jobs
+      return await tx.invoice.findUnique({
+        where: { id: clonedInvoice.id },
+        include: {
+          jobRegister: true,
+          invoiceSelectedJobs: {
+            include: {
+              job: true,
+            },
+          },
+        },
+      });
     });
   }
 

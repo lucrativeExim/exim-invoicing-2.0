@@ -613,12 +613,16 @@ model Invoice {
   proforma_canceled_at          DateTime?            @db.DateTime(0)
   proforma_canceled_by          Int?
   credit_debit_note_number      String?               @db.VarChar(255)
+  cancel_reason                 String?               @db.Text
+  linked_canceled_invoice       Int?
 
   jobRegister                  JobRegister?          @relation(fields: [job_register_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   addedByUser                  User?                 @relation("InvoiceAddedBy", fields: [added_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   canceledByUser               User?                 @relation("InvoiceCanceledBy", fields: [canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   proformaCreatedByUser         User?                 @relation("InvoiceProformaCreatedBy", fields: [proforma_created_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
   proformaCanceledByUser        User?                 @relation("InvoiceProformaCanceledBy", fields: [proforma_canceled_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  linkedCanceledInvoice        Invoice?              @relation("InvoiceLinkedCanceled", fields: [linked_canceled_invoice], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  reopenedInvoices             Invoice[]             @relation("InvoiceLinkedCanceled")
   invoiceSelectedJobs          InvoiceSelectedJob[]
   invoiceAnnexures             InvoiceAnnexure[]
 
@@ -637,6 +641,7 @@ model Invoice {
   @@index([canceled_by], name: "idx_canceled_by")
   @@index([proforma_created_by], name: "idx_proforma_created_by")
   @@index([proforma_canceled_by], name: "idx_proforma_canceled_by")
+  @@index([linked_canceled_invoice], name: "idx_linked_canceled_invoice")
   @@map("invoices")
 }
 

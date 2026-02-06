@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 
-// Format date to dd/mm/yyyy
+// Format date to dd-mm-yyyy
 const formatDateToDDMMYYYY = (dateString) => {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -11,13 +11,13 @@ const formatDateToDDMMYYYY = (dateString) => {
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
+  return `${day}-${month}-${year}`;
 };
 
-// Parse dd/mm/yyyy to YYYY-MM-DD for HTML5 date input
+// Parse dd-mm-yyyy to YYYY-MM-DD for HTML5 date input
 const parseDDMMYYYYToDate = (dateString) => {
   if (!dateString) return '';
-  const parts = dateString.split('/');
+  const parts = dateString.split('-');
   if (parts.length !== 3) return '';
   
   const day = parts[0].padStart(2, '0');
@@ -71,28 +71,29 @@ const DateInput = ({
 
   useEffect(() => {
     if (value) {
-      // If value is in YYYY-MM-DD format, convert to dd/mm/yyyy for display
+      // If value is in YYYY-MM-DD format, convert to dd-mm-yyyy for display
       if (value.match(/^\d{4}-\d{2}-\d{2}$/)) {
         setDisplayValue(formatDateToDDMMYYYY(value));
         setDatePickerValue(value); // Keep YYYY-MM-DD for date picker
       } else {
-        // Try to parse as dd/mm/yyyy
-        const parts = value.split('/');
+        // Try to parse as dd-mm-yyyy or dd/mm/yyyy (backward compatibility)
+        const parts = value.split('-').length === 3 ? value.split('-') : value.split('/');
         if (parts.length === 3) {
           const [day, month, year] = parts;
           // If year is 2 digits, try to convert to 4 digits
           if (year.length === 2) {
             const yearNum = parseInt(year, 10);
             const fullYear = yearNum < 50 ? `20${year}` : `19${year}`;
-            const formatted = `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${fullYear}`;
+            const formatted = `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${fullYear}`;
             setDisplayValue(formatted);
             const parsed = parseDDMMYYYYToDate(formatted);
             if (parsed) {
               setDatePickerValue(parsed);
             }
           } else if (year.length === 4) {
-            setDisplayValue(value);
-            const parsed = parseDDMMYYYYToDate(value);
+            const formatted = `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
+            setDisplayValue(formatted);
+            const parsed = parseDDMMYYYYToDate(formatted);
             if (parsed) {
               setDatePickerValue(parsed);
             }
@@ -114,7 +115,7 @@ const DateInput = ({
     setDatePickerValue(dateValue);
     
     if (dateValue) {
-      // Convert to dd/mm/yyyy for display
+      // Convert to dd-mm-yyyy for display
       const formatted = formatDateToDDMMYYYY(dateValue);
       setDisplayValue(formatted);
       
@@ -144,12 +145,12 @@ const DateInput = ({
     // Remove non-digit and non-slash characters
     inputValue = inputValue.replace(/[^\d/]/g, '');
     
-    // Limit to 10 characters (dd/mm/yyyy)
+    // Limit to 10 characters (dd-mm-yyyy)
     if (inputValue.length > 10) {
       inputValue = inputValue.slice(0, 10);
     }
     
-    // Auto-format as user types: enforce dd/mm/yyyy format
+    // Auto-format as user types: enforce dd-mm-yyyy format
     let formatted = inputValue;
     
     // Remove existing slashes to rebuild format
@@ -184,7 +185,7 @@ const DateInput = ({
         validMonth = '12';
       }
       
-      formatted = validDay + '/' + validMonth;
+      formatted = validDay + '-' + validMonth;
     } else if (digits.length <= 8) {
       // Day, month, and partial year - limit year to 4 digits
       const day = digits.slice(0, 2);
@@ -205,7 +206,7 @@ const DateInput = ({
         validMonth = '12';
       }
       
-      formatted = validDay + '/' + validMonth + '/' + year;
+      formatted = validDay + '-' + validMonth + '-' + year;
     } else {
       // Full date - limit year to exactly 4 digits
       const day = digits.slice(0, 2);
@@ -226,14 +227,14 @@ const DateInput = ({
         validMonth = '12';
       }
       
-      formatted = validDay + '/' + validMonth + '/' + year;
+      formatted = validDay + '-' + validMonth + '-' + year;
     }
     
     setDisplayValue(formatted);
     
     // Validate and convert to YYYY-MM-DD format for storage
-    if (formatted.length === 10 && formatted.split('/').length === 3) {
-      const parts = formatted.split('/');
+    if (formatted.length === 10 && formatted.split('-').length === 3) {
+      const parts = formatted.split('-');
       const [day, month, year] = parts;
       
       // Validate date parts
@@ -265,7 +266,7 @@ const DateInput = ({
   const handleTextBlur = () => {
     // Validate and format on blur
     if (displayValue) {
-      const parts = displayValue.split('/');
+      const parts = displayValue.split('-').length === 3 ? displayValue.split('-') : displayValue.split('/');
       if (parts.length === 3) {
         let [day, month, year] = parts;
         
@@ -301,7 +302,7 @@ const DateInput = ({
           day = dayNum > 31 ? '31' : '01';
         }
         
-        const formatted = `${day}/${month}/${year}`;
+        const formatted = `${day}-${month}-${year}`;
         
         if (validateDateParts(day, month, year)) {
           setDisplayValue(formatted);
@@ -349,7 +350,7 @@ const DateInput = ({
           tabIndex={-1}
         />
         
-        {/* Visible text input for dd/mm/yyyy display */}
+        {/* Visible text input for dd-mm-yyyy display */}
         <input
           type="text"
           id={name}
@@ -357,7 +358,7 @@ const DateInput = ({
           value={displayValue}
           onChange={handleTextChange}
           onBlur={handleTextBlur}
-          placeholder={placeholder || 'dd/mm/yyyy'}
+          placeholder={placeholder || 'dd-mm-yyyy'}
           maxLength={10}
           required={required}
           className={`input-field pr-8 ${error ? 'border-red-500 focus:ring-red-500' : ''} ${props.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}

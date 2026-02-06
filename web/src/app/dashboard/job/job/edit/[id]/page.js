@@ -111,12 +111,12 @@ export default function EditJobPage() {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="text-center py-8">
           <p className="text-red-600 mb-4">{error}</p>
-          <button
+          <Button
             onClick={() => router.back()}
-            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
+            variant="primary"
           >
             Go Back
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -127,12 +127,12 @@ export default function EditJobPage() {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="text-center py-8">
           <p className="text-gray-600 mb-4">Job not found</p>
-          <button
+          <Button
             onClick={() => router.back()}
-            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg"
+            variant="primary"
           > 
             Go Back
-          </button>
+          </Button>
         </div>
       </div>
     );

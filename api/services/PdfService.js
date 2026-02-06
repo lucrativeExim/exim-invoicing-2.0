@@ -79,13 +79,37 @@ class PdfService {
       // Additional wait to ensure styles are applied and content is rendered
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Verify annexure is present if needed
+      // Verify annexure is present if needed and calculate page numbers
+      let annexurePageCount = 0;
       if (jobIds.length > 1) {
         const annexureExists = await page.evaluate(() => {
           return document.querySelector('.annexure-page') !== null;
         });
         if (!annexureExists) {
           console.warn('Annexure page not found in HTML');
+        } else {
+          // Calculate annexure pages by checking content height
+          annexurePageCount = await page.evaluate(() => {
+            const annexureElement = document.querySelector('.annexure-page');
+            if (!annexureElement) return 0;
+            // A4 page height in pixels at 96 DPI: ~1123px (297mm)
+            // Account for margins: ~1000px usable height per page
+            const pageHeight = 1000; // Approximate usable height per page
+            const contentHeight = annexureElement.scrollHeight;
+            return Math.max(1, Math.ceil(contentHeight / pageHeight));
+          });
+          
+          // Update page numbers in annexure header
+          await page.evaluate((totalPages) => {
+            const pageNumberElements = document.querySelectorAll('.annexure-page-number, .annexure-current-page');
+            pageNumberElements.forEach(el => {
+              if (el.classList.contains('annexure-current-page')) {
+                el.textContent = '1'; // Will be updated per page
+              } else if (el.textContent.includes('of')) {
+                el.textContent = el.textContent.replace(/of \d+/, `of ${totalPages}`);
+              }
+            });
+          }, annexurePageCount);
         }
       }
       
@@ -99,13 +123,9 @@ class PdfService {
         },
         printBackground: true,
         preferCSSPageSize: true,
-        displayHeaderFooter: true,
+        displayHeaderFooter: false,
         headerTemplate: '<div></div>',
-        footerTemplate: `
-          <div style="font-size: 10px; font-family: 'Times New Roman', Times, serif; width: 100%; text-align: right; padding-right: 20px; color: #000;">
-            <span class="pageNumber"></span> of <span class="totalPages"></span>
-          </div>
-        `
+        footerTemplate: '<div></div>'
       });
       
       return pdf;
@@ -151,6 +171,35 @@ class PdfService {
         }
       }
       return null;
+    };
+
+    // Helper function to check if field name is Quantity (case-insensitive)
+    const isQuantityField = (fieldName) => {
+      if (!fieldName) return false;
+      const lowerFieldName = fieldName.toLowerCase().trim();
+      return lowerFieldName === "quantity";
+    };
+
+    // Helper function to calculate total quantity across all jobs
+    const calculateTotalQuantity = (jobIds, jobFieldValuesMap, fieldName) => {
+      if (!jobIds || jobIds.length === 0) return null;
+      
+      let total = 0;
+      let hasValidQuantity = false;
+
+      jobIds.forEach((jobId) => {
+        const quantityValue = getFieldValue(jobId, fieldName);
+        
+        if (quantityValue !== null && quantityValue !== undefined && quantityValue !== "NA") {
+          const numValue = parseFloat(quantityValue);
+          if (!isNaN(numValue)) {
+            total += numValue;
+            hasValidQuantity = true;
+          }
+        }
+      });
+
+      return hasValidQuantity ? total : null;
     };
 
     // Calculate service subtotal
@@ -447,7 +496,7 @@ class PdfService {
       line-height: 1.4;
     }
     .invoice-details-box {
-      padding: 12px;
+      padding: 2px;
     }
     .invoice-title {
       font-weight: bold !important;
@@ -577,6 +626,23 @@ class PdfService {
       gap: 16px;
       margin-bottom: 16px;
     }
+    @media print {
+      .annexure-header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        z-index: 1000;
+        padding: 8px 0px;
+        border-bottom: 1px solid #e5e7eb;
+        page-break-inside: avoid;
+        margin-bottom: 0;
+      }
+      .annexure-content-start {
+        padding-top: 10px;
+      }
+    }
     .annexure-title {
       font-weight: bold !important;
       font-size: 12px !important;
@@ -659,7 +725,7 @@ class PdfService {
       width: 100% !important;
       height: 100% !important;
       object-fit: contain !important;
-      opacity: 0.20 !important;
+      opacity: 0.10 !important;
       filter: grayscale(100%) brightness(1.0) !important;
     }
     /* Ensure watermark appears on every printed page */
@@ -685,7 +751,7 @@ class PdfService {
         width: 100% !important;
         height: 100% !important;
         object-fit: contain !important;
-        opacity: 0.20 !important;
+        opacity: 0.06 !important;
         filter: grayscale(100%) brightness(1.0) !important;
       }
     }
@@ -728,7 +794,7 @@ class PdfService {
       width: 100%;
       height: 100%;
       object-fit: contain;
-      opacity: 0.20;
+      opacity: 0.06;
       filter: grayscale(100%) brightness(1.0);
     }
     /* Ensure content appears above watermark */
@@ -751,6 +817,35 @@ class PdfService {
   }
 
   static generateInvoicePageHtml(invoiceData, account, invoiceNo, invoiceDate, jobIds, billingType, jobs, jobServiceChargesMap, billingFieldNames, firstJob, clientInfo, jobCodeName, sacNo, jobFieldValuesMap, getFieldValue, serviceSubtotal, gst, remiFields, totalInWords, logoImg, logoBase64) {
+    // Helper function to check if field name is Quantity (case-insensitive)
+    const isQuantityField = (fieldName) => {
+      if (!fieldName) return false;
+      const lowerFieldName = fieldName.toLowerCase().trim();
+      return lowerFieldName === "quantity";
+    };
+
+    // Helper function to calculate total quantity across all jobs
+    const calculateTotalQuantity = (jobIds, jobFieldValuesMap, fieldName) => {
+      if (!jobIds || jobIds.length === 0) return null;
+      
+      let total = 0;
+      let hasValidQuantity = false;
+
+      jobIds.forEach((jobId) => {
+        const quantityValue = getFieldValue(jobId, fieldName);
+        
+        if (quantityValue !== null && quantityValue !== undefined && quantityValue !== "NA") {
+          const numValue = parseFloat(quantityValue);
+          if (!isNaN(numValue)) {
+            total += numValue;
+            hasValidQuantity = true;
+          }
+        }
+      });
+
+      return hasValidQuantity ? total : null;
+    };
+
     return `
     <div class="invoice-page">
       ${logoBase64 ? `<div class="page-watermark"><img src="${logoBase64}" alt="Watermark" /></div>` : ''}
@@ -812,13 +907,48 @@ class PdfService {
               <div style="font-weight: 600; margin-bottom: 4px;">DETAILS: ${this.escapeHtml(jobCodeName)}</div>
               ${billingFieldNames.map(fieldName => {
                 const fieldValue = jobIds.length > 0 ? getFieldValue(jobIds[0], fieldName) : null;
+                
+                // For Quantity field with multiple jobs, calculate total
+                let displayValue = fieldValue || "NA";
+                if (jobIds.length > 1 && isQuantityField(fieldName)) {
+                  const totalQuantity = calculateTotalQuantity(
+                    jobIds,
+                    jobFieldValuesMap,
+                    fieldName
+                  );
+                  if (totalQuantity !== null) {
+                    displayValue = totalQuantity;
+                  } else {
+                    displayValue = "As Per Annexure";
+                  }
+                } else if (jobIds.length > 1) {
+                  displayValue = "As Per Annexure";
+                }
+                
                 return `
                 <div class="field-row">
                   <div>${this.escapeHtml(fieldName)}</div>
-                  <div>${jobIds.length > 1 ? "As Per Annexure" : this.escapeHtml(fieldValue || "NA")}</div>
+                  <div>${this.escapeHtml(String(displayValue))}</div>
                 </div>
                 `;
               }).join('')}
+              ${jobIds.length === 1 ? (() => {
+                const remarkValue = 
+                  getFieldValue(jobIds[0], "remark") ||
+                  getFieldValue(jobIds[0], "Remark") ||
+                  (firstJob?.remark) ||
+                  null;
+                
+                if (remarkValue && remarkValue.trim() !== "") {
+                  return `
+                  <div class="field-row" style="margin-top: 1px; grid-template-columns: 2fr 8fr;">
+                    <div>Remark</div>
+                    <div style="text-align: left;">${this.escapeHtml(remarkValue)}</div>
+                  </div>
+                  `;
+                }
+                return '';
+              })() : ''}
               <div style="margin-top: 8px; font-weight: 600;">CHARGES AS UNDER:</div>
               ${clientInfo?.invoice_description ? `<div style="font-size: 11px; margin-top: 4px;">${this.escapeHtml(clientInfo.invoice_description)}</div>` : ''}
             </div>
@@ -857,7 +987,7 @@ class PdfService {
           </div>
           <div style="padding: 0; position: relative;">
             <div style="border-top: 1px solid #000 !important;"></div>
-            <div style="font-size: 11px !important; padding-top: 4px; padding-bottom: 4px;">
+            <div style="font-size: 11px !important; padding-top: 8px; padding-bottom: 4px;">
               <div>
                 <span style="font-weight: 600;">SAC No. :</span> ${this.escapeHtml(sacNo)}
               </div>
@@ -873,9 +1003,9 @@ class PdfService {
             </div>
             <div style="border-top: 1px solid #000 !important;"></div>
             ${invoiceData.finalAmount ? `
-            <div style="font-size: 11px !important; padding-top: 4px; padding-bottom: 4px;">
+            <div style="font-size: 11px !important; padding-top: 8px; padding-bottom: 4px;">
               <span style="font-weight: 600;">Amount in Words : </span>
-              <span style="font-weight: 600;">Rs. </span>
+              <span style="font-weight: 600;">₹. </span>
               ${totalInWords}
             </div>
             ` : ''}
@@ -955,10 +1085,10 @@ class PdfService {
       <div class="footer">
         <div style="font-weight: 600; margin-bottom: 20px; margin-top: 1px;">Thank You For Business.</div>
       </div>
-      <div class="signature padding-top: 25px; margin-top: 25px;">
+      <div class="signature padding-top: 25px; margin-top: 40px;">
         For ${this.escapeHtml(account?.account_name || "NA")}
       </div>
-      <div style="text-align: center; margin-top: 1px;">
+      <div style="text-align: center; margin-top: 6px !important; padding-top: 2px !important;">
         <span style="font-size: 12px; display: block;">
           As Per Rule 46(q) of GST act 2017 said Invoice is digitally signed
         </span>
@@ -966,7 +1096,7 @@ class PdfService {
           Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
         </span>
         <span style="font-size: 12px; display: block;">
-          Ph:+91 20 3511 3202, Website: www.lucrative.co.in
+          Ph:+91 20 3511 3202 : www.lucrative.co.in
         </span>
       </div>
     </div>
@@ -994,6 +1124,42 @@ class PdfService {
       } catch {
         return String(dateStr);
       }
+    };
+
+    // Format field value - if it's a date in YYYY-MM-DD format, convert to dd-mm-yyyy
+    // Otherwise return the value as-is
+    const formatFieldValue = (value) => {
+      if (!value || value === "NA" || value === null || value === undefined) {
+        return value;
+      }
+      
+      const strValue = String(value).trim();
+      
+      // Check if value matches YYYY-MM-DD format (e.g., 2026-01-31)
+      const dateMatch = strValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateMatch) {
+        const [, year, month, day] = dateMatch;
+        return `${day}-${month}-${year}`;
+      }
+      
+      // Try parsing as date to catch other date formats
+      try {
+        const date = new Date(strValue);
+        if (!isNaN(date.getTime())) {
+          // Check if the parsed date matches the input string (to avoid false positives)
+          const dateStr = date.toISOString().split('T')[0];
+          if (dateStr === strValue || strValue.includes('-')) {
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}-${month}-${year}`;
+          }
+        }
+      } catch (e) {
+        // Not a date, return as-is
+      }
+      
+      return value;
     };
 
     // Helper to get field value with multiple key variations
@@ -1181,7 +1347,7 @@ class PdfService {
     const getDynamicAmountFields = (jobId) => {
       const fields = [
         {
-          name: "Exem Amt",
+          name: "Exemp Amt",
           keys: [
             "exempted_amount",
             "Exempted Amount",
@@ -1339,6 +1505,9 @@ class PdfService {
     });
     const allUsedRemiFieldsArray = Array.from(allUsedRemiFieldsMap.values()).sort((a, b) => a.key.localeCompare(b.key));
 
+    // Ensure jobIds is an array (declare early so we can use it for page calculation)
+    const jobIdsArray = Array.isArray(jobIds) ? jobIds : [];
+
     // Calculate totals
     const totals = {
       charges: 0,
@@ -1349,24 +1518,27 @@ class PdfService {
       remiFields: [0, 0, 0, 0, 0]
     };
 
+    // Calculate estimated total pages for annexure
+    // Each job typically takes ~1 page, plus header and totals (~1 page)
+    const estimatedTotalPages = Math.max(1, Math.ceil(jobIdsArray.length * 1.0) + 1);
+    
     let annexureHtml = `
-    <div class="annexure-page" style="display: block !important; visibility: visible !important;">
+    <div class="annexure-page" style="display: block !important; visibility: visible !important; position: relative;">
       ${logoBase64 ? `<div class="page-watermark"><img src="${logoBase64}" alt="Watermark" /></div>` : ''}
       <div class="annexure-header">
         <div class="annexure-title">
+          ${this.escapeHtml(accountName)}<br />
           Annexure to Inv No. ${this.escapeHtml(invoiceNo)} Date ${formatDate(invoiceDate)}
         </div>
-        <div class="annexure-title" style="text-align: right;">
-          ${this.escapeHtml(accountName)}
+        <div class="annexure-title annexure-page-number" style="text-align: right;">
+          <span style="font-size: 10px; font-family: 'Times New Roman', Times, serif;">Page <span class="annexure-current-page">1</span> of ${estimatedTotalPages}</span>
         </div>
       </div>
+      <div class="annexure-content-start">
     `;
-
-    // Ensure jobIds is an array
-    const jobIdsArray = Array.isArray(jobIds) ? jobIds : [];
     
     if (jobIdsArray.length === 0) {
-      return annexureHtml + `</div>`;
+      return annexureHtml + `</div></div>`;
     }
 
     // Process each job
@@ -1445,7 +1617,7 @@ class PdfService {
       annexureHtml += `
       <div style="margin-bottom: 20px;">
         <!-- Administrative Information -->
-        <div style="margin-bottom: 12px;">
+        <div style="margin-bottom: 6px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap-x: 32px; gap-y: 4px; font-size: 11px;">
             <div style="display: flex; align-items: center;">
               <span style="font-weight: bold; min-width: 150px;">Sr No :</span>
@@ -1458,14 +1630,15 @@ class PdfService {
           </div>
           
           ${billingFieldNames && billingFieldNames.length > 0 ? `
-          <div style="margin-top: 8px;">
+          <div style="margin-top: 3px;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap-x: 32px; gap-y: 4px; font-size: 11px;">
               ${billingFieldNames.map((fieldName) => {
                 const fieldValue = getFieldValueMulti(jobId, [fieldName], []) || "NA";
+                const formattedValue = formatFieldValue(fieldValue);
                 return `
                 <div style="display: flex; align-items: center;">
                   <span style="min-width: 150px;">${this.escapeHtml(fieldName)} :</span>
-                  <span>${this.escapeHtml(String(fieldValue))}</span>
+                  <span>${this.escapeHtml(String(formattedValue))}</span>
                 </div>
                 `;
               }).join('')}
@@ -1475,7 +1648,7 @@ class PdfService {
         </div>
 
         <!-- Charges Table -->
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #000 !important; font-size: 10px;">
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid #000 !important; font-size: 10px; margin-bottom: 2px !important; padding-bottom: 0px !important;">
           <thead>
             <tr style="background: #f0f0f0 !important;">
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">Claim No</th>
@@ -1493,7 +1666,7 @@ class PdfService {
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">Service<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">CA Cert<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">CE Cert<br />Charges</th>
-              <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">Regi/Other<br />Charges</th>
+              <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">Regi/Othr<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">Appli<br />Fees</th>
               ${remiFieldsArray.map(rf => `
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: left; vertical-align: top;">${this.escapeHtml(rf.description)}</th>
@@ -1544,9 +1717,9 @@ class PdfService {
         </table>
         
         ${job.remark && job.remark.trim() !== "" ? `
-        <!-- Descriptive Text Section -->
-        <div style="font-size: 11px; margin-top: 16px; margin-bottom: 16px;">
-          descriptive : ${this.escapeHtml(job.remark)}
+        <!-- Remark Text Section -->
+        <div style="font-size: 11px; margin-top: 0px !important; padding-top: 0px !important; margin-bottom: 10px;">
+          Remark : ${this.escapeHtml(job.remark)}
         </div>
         ` : ''}
       </div>
@@ -1561,22 +1734,19 @@ class PdfService {
       <!-- Total Row -->
       <div style="margin-top: 20px;">
         <table style="width: 100%; border-collapse: collapse; border: 1px solid #000 !important; font-size: 10px;">
-          <thead>
+          <tbody>
             <tr>
-              <th colspan="${1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}" style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;"></th>
+              <td rowspan="2" colspan="${1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}" style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center !important; vertical-align: middle !important; display: table-cell;">TOTAL</td>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">Service<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">CA Cert<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">CE Cert<br />Charges</th>
-              <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">Regi/Other<br />Charges</th>
+              <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">Regi/Othr<br />Charges</th>
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">Appli<br />Fees</th>
               ${allUsedRemiFieldsArray.map(rf => `
               <th style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">${this.escapeHtml(rf.description)}</th>
               `).join('')}
             </tr>
-          </thead>
-          <tbody>
             <tr>
-              <td colspan="${1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}" style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: center; vertical-align: top;">TOTAL</td>
               <td style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: right; vertical-align: top; white-space: nowrap;">${parseFloat(totals.charges).toFixed(2)}</td>
               <td style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: right; vertical-align: top; white-space: nowrap;">${parseFloat(totals.caCharges).toFixed(2)}</td>
               <td style="border: 1px solid #000 !important; padding: 4px 6px; font-weight: bold !important; text-align: right; vertical-align: top; white-space: nowrap;">${parseFloat(totals.ceCharges).toFixed(2)}</td>
@@ -1593,10 +1763,10 @@ class PdfService {
       </div>
 
       <!-- Footer Section -->
-      <div style="text-align: right; padding-top: 25px; margin-top: 35px; margin-bottom: 2px;">
+      <div style="text-align: right; padding-top: 25px; margin-top: 40px; margin-bottom: 2px;">
         <span style="font-weight: 600; font-size: 14px;">For ${this.escapeHtml(accountName || "NA")}</span>
       </div>
-      <div style="padding: 0 12px; margin-bottom: 1px;">
+      <div style="padding: 0 12px; margin-top: 6px !important; padding-top: 2px !important; margin-bottom: 1px;">
         <div style="text-align: center; margin-top: 2px;">
           <span style="font-size: 12px; display: block;">
             As Per Rule 46(q) of GST act 2017 said Invoice is digitally signed
@@ -1605,10 +1775,12 @@ class PdfService {
             Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
           </span>
           <span style="font-size: 12px; display: block;">
-            Ph:+91 20 3511 3202, Website: www.lucrative.co.in
+            Ph:+91 20 3511 3202 : www.lucrative.co.in
           </span>
         </div>
       </div>
+      </div>
+      <!-- End Content Wrapper -->
     </div>
     `;
 

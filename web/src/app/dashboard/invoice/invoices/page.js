@@ -86,12 +86,13 @@ export default function InvoicesPage() {
   const invoiceTypeOptions = [
     { value: 'draft', label: 'Draft Invoice' },
     { value: 'proforma', label: 'Proforma Invoice' },
+    { value: 'canceled', label: 'Canceled Invoice' },
   ];
 
   // Initialize invoice type from URL params on mount
   useEffect(() => {
     const typeFromUrl = searchParams.get('type');
-    if (typeFromUrl && (typeFromUrl === 'draft' || typeFromUrl === 'proforma')) {
+    if (typeFromUrl && (typeFromUrl === 'draft' || typeFromUrl === 'proforma' || typeFromUrl === 'canceled')) {
       setInvoiceType(typeFromUrl);
     }
   }, [searchParams]);
@@ -102,7 +103,7 @@ export default function InvoicesPage() {
     
     // Update URL with selected invoice type
     const params = new URLSearchParams(searchParams.toString());
-    if (selectedValue && (selectedValue === 'draft' || selectedValue === 'proforma')) {
+    if (selectedValue && (selectedValue === 'draft' || selectedValue === 'proforma' || selectedValue === 'canceled')) {
       params.set('type', selectedValue);
     } else {
       params.delete('type');
@@ -127,6 +128,9 @@ export default function InvoicesPage() {
           invoiceStageStatus = 'Draft';
         } else if (invoiceType === 'proforma') {
           invoiceStageStatus = 'Proforma';
+        } else if (invoiceType === 'canceled') {
+          invoiceStatus = 'InActive';
+          invoiceStageStatus = 'Canceled';
         }
 
         // Build params object, only include invoice_stage_status if it has a value
@@ -192,7 +196,7 @@ export default function InvoicesPage() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">
-                {invoiceType === 'draft' ? 'Draft Invoices' : 'Proforma Invoices'}
+                {invoiceType === 'draft' ? 'Draft Invoices' : invoiceType === 'proforma' ? 'Proforma Invoices' : 'Canceled Invoices'}
               </h2>
               <div className="w-80">
                 <TableSearch
@@ -228,7 +232,7 @@ export default function InvoicesPage() {
                         View
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {invoiceType === 'draft' ? 'Draft ID' : 'Proforma ID'}
+                        {invoiceType === 'draft' ? 'Draft ID' : invoiceType === 'proforma' ? 'Proforma ID' : 'Invoice ID'}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Job Register
@@ -263,7 +267,11 @@ export default function InvoicesPage() {
                           </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {invoiceType === 'draft' ? invoice.draft_view_id || '-' : invoice.proforma_view_id || '-'}
+                          {invoiceType === 'draft' 
+                            ? invoice.draft_view_id || '-' 
+                            : invoiceType === 'proforma' 
+                            ? invoice.proforma_view_id || '-' 
+                            : invoice.draft_view_id || invoice.proforma_view_id || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {invoice.jobRegister?.job_code || '-'}
@@ -285,15 +293,23 @@ export default function InvoicesPage() {
                         </td> 
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDateDDMMYYYY(
-                            invoiceType === 'proforma' 
+                            invoiceType === 'canceled'
+                              ? invoice.proforma_canceled_at || invoice.created_at
+                              : invoiceType === 'proforma' 
                               ? invoice.proforma_created_at 
                               : invoice.created_at
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {invoiceType === 'Proforma' 
-                            ? (invoice.proforma_created_by
-                                ? `${invoice.proforma_created_by.first_name} ${invoice.proforma_created_by.last_name}`
+                          {invoiceType === 'canceled'
+                            ? (invoice.proformaCanceledByUser
+                                ? `${invoice.proformaCanceledByUser.first_name} ${invoice.proformaCanceledByUser.last_name}`
+                                : invoice.addedByUser
+                                ? `${invoice.addedByUser.first_name} ${invoice.addedByUser.last_name}`
+                                : '-')
+                            : invoiceType === 'proforma' 
+                            ? (invoice.proformaCreatedByUser
+                                ? `${invoice.proformaCreatedByUser.first_name} ${invoice.proformaCreatedByUser.last_name}`
                                 : '-')
                             : (invoice.addedByUser
                                 ? `${invoice.addedByUser.first_name} ${invoice.addedByUser.last_name}`

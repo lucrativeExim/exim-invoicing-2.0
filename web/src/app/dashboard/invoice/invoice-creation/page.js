@@ -1088,17 +1088,29 @@ export default function InvoiceCreationPage() {
       return; // Don't update if invalid
     }
 
-    // Allow partial input (e.g., "5.", "10.5")
-    // Store the raw input value for free typing
+    const baseAmount = parseFloat(invoiceCalculation.amount) || 0;
+    const numericValue = parseFloat(inputValue);
+    
+    // If value exceeds base amount, cap it at base amount
+    let finalValue = inputValue;
+    if (!isNaN(numericValue) && baseAmount > 0 && numericValue > baseAmount) {
+      finalValue = baseAmount.toFixed(2);
+      setRewardDiscountErrors((prev) => ({
+        ...prev,
+        amount: `Amount cannot exceed base amount of ${baseAmount.toFixed(2)}`,
+      }));
+    } else {
+      // Clear error if valid or base amount is 0
+      setRewardDiscountErrors((prev) => ({
+        ...prev,
+        amount: "",
+      }));
+    }
+
+    // Store the value (capped at base amount if exceeded)
     setInvoiceCalculation((prev) => ({
       ...prev,
-      [fieldName]: inputValue,
-    }));
-
-    // Clear error while typing
-    setRewardDiscountErrors((prev) => ({
-      ...prev,
-      amount: "",
+      [fieldName]: finalValue,
     }));
   };
 

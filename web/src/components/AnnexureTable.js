@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from 'react';
+import { formatFieldValue } from '@/utils/dateUtils';
+
 /**
  * AnnexureTable Component
  * Displays detailed annexure table for invoices with multiple jobs
@@ -88,7 +91,7 @@ export default function AnnexureTable({
   const getDynamicAmountFields = (jobId, job, jobFieldValuesMap) => {
     const fields = [
       {
-        name: "Exem Amt",
+        name: "Exemp Amt",
         keys: [
           "exempted_amount",
           "Exempted Amount",
@@ -677,27 +680,93 @@ export default function AnnexureTable({
     return false;
   };
 
+  // State for page numbers - calculate based on content
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Calculate total annexure pages based on content
+  useEffect(() => {
+    const calculatePages = () => {
+      // Estimate pages: Each job section ~1 page, header + totals ~1 page
+      // More accurate: base on actual content height if available
+      const estimatedPagesPerJob = 1.0;
+      const basePages = 1; // Header and totals section
+      const totalEstimatedPages = Math.max(1, Math.ceil(basePages + (selectedJobIds.length * estimatedPagesPerJob)));
+      setTotalPages(totalEstimatedPages);
+    };
+
+    calculatePages();
+    
+    // Update on window resize or print
+    const handleResize = () => calculatePages();
+    const handleBeforePrint = () => calculatePages();
+    
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('beforeprint', handleBeforePrint);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('beforeprint', handleBeforePrint);
+    };
+  }, [selectedJobIds.length]);
 
   return (
-    <div className="max-w-4xl mx-auto p-4 print:p-0 print:max-w-full print:page-break-before-always">
-      <div
-        className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-4"
-        style={{ minHeight: "29.7cm" }}
-      >
-        {/* Annexure Header */}
-        <div className="grid grid-cols-12 gap-4 mb-4">
-          <div className="col-span-7">
-            <div className="font-bold text-sm">
-              Annexure to Inv No. {invoiceNo} Date {formatDateToDDMMYYYY(invoiceDate)}
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        /* Hide page number on screen view */
+        .annexure-page-number {
+          display: none;
+        }
+        
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 1.0cm;
+          }
+          /* Show page number only in print/PDF */
+          .annexure-page-number {
+            display: block;
+            font-size: 10px;
+            font-family: "Times New Roman", Times, serif;
+          }
+          /* Make header section repeat on each page */
+          .annexure-header-section {
+            background: white;
+            padding: 8px 32px;
+            border-bottom: 1px solid #e5e7eb;
+            page-break-inside: avoid;
+            display: grid;
+            grid-template-columns: 7fr 5fr;
+            gap: 16px;
+            width: 100%;
+            box-sizing: border-box;
+          }
+          .annexure-content-wrapper {
+            padding-top: 0;
+          }
+        }
+      `}} />
+      <div className="max-w-4xl mx-auto p-4 print:p-0 print:max-w-full print:page-break-before-always">
+        <div
+          className="bg-white shadow-2xl print:shadow-none p-8 print:p-8 print:pt-4"
+          style={{ minHeight: "29.7cm", position: "relative" }}
+        >
+          {/* Annexure Header - Repeats on each page */}
+          <div className="annexure-header-section grid grid-cols-12 gap-4 mb-4 print:mb-0">
+            <div className="col-span-7">
+              <div className="font-bold text-sm">
+                {accountName}
+              </div>
+              <div className="font-bold text-sm">
+                Annexure to Inv No. {invoiceNo} Date {formatDateToDDMMYYYY(invoiceDate)}
+              </div>
+            </div>
+            <div className="col-span-5 text-right annexure-page-number">
+              Page 1 of {totalPages}
             </div>
           </div>
-          <div className="col-span-5 text-right">
-            <div className="font-bold text-sm">
-              {accountName}
-            </div>
-          </div>
-        </div>
 
+          {/* Content wrapper - adds padding for fixed header in print */}
+          <div className="annexure-content-wrapper print:pt-0">
         {selectedJobIds.map((jobId, sectionIndex) => {
           const job = jobs.find((j) => j.id === jobId);
           const jobServiceCharge = jobServiceChargesMap[jobId];
@@ -869,8 +938,20 @@ export default function AnnexureTable({
             }
           });
 
-          // Get descriptive text from job.remark
-          const descriptiveText = job.remark || "";
+          // Get remark text from job.remark or jobFieldValuesMap
+          const remarkText = 
+            getFieldValueFromJobFieldValue(
+              jobId,
+              "remark",
+              jobFieldValuesMap
+            ) ||
+            getFieldValueFromJobFieldValue(
+              jobId,
+              "Remark",
+              jobFieldValuesMap
+            ) ||
+            job.remark ||
+            "";
 
           return (
             <div key={jobId} className={`mb-8 ${sectionIndex > 0 ? 'print:page-break-before-always' : ''}`}>
@@ -898,10 +979,12 @@ export default function AnnexureTable({
                           fieldName,
                           jobFieldValuesMap
                         ) || "NA";
+                        // Format date values to dd-mm-yyyy format
+                        const formattedValue = formatFieldValue(fieldValue);
                         return (
                           <div key={index} className="flex items-center">
                             <span className=" min-w-[150px]">{fieldName} : </span>
-                            <span>{fieldValue}</span>
+                            <span>{formattedValue}</span>
                           </div>
                         );
                       })}
@@ -942,7 +1025,7 @@ export default function AnnexureTable({
                       <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Service <br /> Charges</th>
                       <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CA Cert <br /> Charges</th>
                       <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">CE Cert <br />Charges</th>
-                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Regi/Other <br /> Charges</th>
+                      <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Regi/Othr <br /> Charges</th>
                       <th className="border border-black px-1 py-1.5 text-left font-bold whitespace-nowrap align-top">Appli <br /> Fees</th>
                       {remiFieldsArray.map((remiField, index) => (
                         <th key={index} className="border border-black px-1 py-1.5 text-left font-bold align-top">
@@ -1001,28 +1084,31 @@ export default function AnnexureTable({
                 </table>
               </div>
 
-              {/* Descriptive Text Section */}
-              {descriptiveText && (
+              {/* Remark Section */}
+              {remarkText && remarkText.trim() !== "" && (
                 <div className="text-xs mb-4">
-                  descriptive : {descriptiveText}
+                  Remark : {remarkText}
                 </div>
               )}
             </div>
           );
         })}
+          </div>
+          {/* End Content Wrapper */}
         
         {/* Total Row Section */}
         <div className="mt-8">
           <div className="invoice-table-container max-w-[210mm] mx-auto" style={{ width: '100%', maxWidth: '210mm' }}>
             <table className="w-full border-collapse border border-black text-[10px] print:text-[9px]" style={{ tableLayout: 'auto', width: '100%' }}>
-              <thead>
+              <tbody className="mb-5">
                 <tr>
-                  <th 
+                  <td 
+                    rowSpan={2}
                     colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
-                    className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top"
+                    className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-middle"
                   >
-                    {/* Empty header for label column */}
-                  </th>
+                    TOTAL
+                  </td>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                     Service <br /> Charges
                   </th>
@@ -1033,7 +1119,7 @@ export default function AnnexureTable({
                     CE Cert <br />Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
-                    Regi/Other <br /> Charges
+                    Regi/Othr <br /> Charges
                   </th>
                   <th className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                     Appli <br /> Fees
@@ -1047,15 +1133,7 @@ export default function AnnexureTable({
                     </th>
                   ))}
                 </tr>
-              </thead>
-              <tbody className="mb-5">
                 <tr>
-                  <td 
-                    colSpan={1 + totalDynamicCombinedFieldsCount + totalDynamicAmountFieldsCount}
-                    className="px-1 py-1.5 text-center font-bold text-black bg-white border border-black whitespace-nowrap align-top"
-                  >
-                    TOTAL
-                  </td>
                   <td className="px-1 py-1.5 text-right font-bold text-black bg-white border border-black whitespace-nowrap align-top">
                     {totals.charges.toFixed(2)}
                   </td>
@@ -1102,11 +1180,12 @@ export default function AnnexureTable({
               Unit No. 65(P), 66, 67, 68(P), Wing - A, 4th Floor, KK Market, Bibwewadi, Pune,
             </span>
             <span className="text-xs block">
-              Ph:+91 20 3511 3202, Website: www.lucrative.co.in
+              Ph:+91 20 3511 3202 : www.lucrative.co.in
             </span>
           </div>
         </div>
       </div>
     </div>
+    </>
   );
 }
